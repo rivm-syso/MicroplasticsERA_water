@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+title: 'Screening level ecological risk assessment of Microplastics in Dutch surface waters'
+message: >-
+  If you use this code, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - name: RIVM
+    address: P.O. Box 1
+    city: Bilthoven
+    country: NL
+    post-code: 3720 BA
+    website: 'https://www.rivm.nl'
+contact:
+  - email: joris.quik@rivm.nl
+    name: "National Institute for Public Health and the Environment"
+repository-code: https://github.com/rivm-syso/MicroplasticsERA_water
+url: [PLACE HOLDER REPORT LINK]
+abstract: This code was created for RIVM report 2026-0069, in which a screening level ecological risk assessment of microplastics in Dutch surface waters was researched. 
+keywords:
+  - RIVM
+  - water 
+  - risk assessment
+  - ecological
+  - concentration
+license: EUPL-1.2
+version: 2026.69.0
