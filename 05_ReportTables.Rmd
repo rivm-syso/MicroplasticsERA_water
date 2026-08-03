@@ -149,7 +149,7 @@ particle_overview_table_raw <- raw_ftir_data |>
 
 particle_overview_table <- particle_overview_table_conc |>
   left_join(particle_overview_table_raw) |>
-    select(River, min_date, max_date, number_of_samples, Sampling_method, average_sample_vol_L, Analysis_method, Lower_sampling_size_limit_um, Upper_sampling_size_limit_um, Data_source)
+    select(River, min_date, max_date, number_of_samples, Sampling_method, average_sample_vol_L, Analysis_method, number_of_particles, Lower_sampling_size_limit_um, Upper_sampling_size_limit_um, Data_source)
 
 knitr::kable(particle_overview_table)
 #openxlsx::write.xlsx(particle_overview_table, file = paste0(output_dir, "/Tables/Table_3_v2.xlsx"))
