@@ -48,7 +48,10 @@ DataVersionConc <- "2026-07-07"
 # unzip(zipfile = paste0(project_dir, output_dir,"Data.zip"),
       # exdir = output_dir)
 
-concentrations <- readRDS(paste0(project_dir, output_dir,"Data/",DataVersionConc,"Particle_concentrations_total.rds"))
+concentrations <- readRDS(paste0(project_dir,
+                                 output_dir,
+                                 "Data/",
+                                 DataVersionConc,"Particle_concentrations_total.rds"))
 
 # Exclude samples from Mintenig (2020)  which were indicated only for MP > 300 um.
 concentrations <- concentrations |>
