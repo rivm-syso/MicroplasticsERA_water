@@ -64,11 +64,17 @@ TODO: please provide versions for the powerlawFit and powerlawFitLDIR which corr
 ```{r}
 DataVersionPowerlawFTIR <- "2026-06-30"
 
-alphasFITR<-read.csv(paste0("/data/BioGrid/hidsa/ERAwater_biogrid/Output/Data/powerlawFitFTIR_All",DataVersionPowerlawFTIR,".csv"))
+alphasFITR <- read.csv(paste0(project_dir,
+                              output_dir,
+                              "/Data/powerlawFitFTIR_All",
+                              DataVersionPowerlawFTIR,".csv"))
 
 DataVersionPowerlawLDIR <- "2026-04-09"
 
-alphasLDIR<-read.csv(paste0(project_dir, output_dir,"Data/powerlawFitLDIR_All",DataVersionPowerlawLDIR,".csv"))
+alphasLDIR <- read.csv(paste0(project_dir,
+                            output_dir,
+                            "Data/powerlawFitLDIR_All",
+                            DataVersionPowerlawLDIR,".csv"))
 ```
 
 Join together and denote which is FTIR and which LDIR (could probably do this in the exporting in parallel.Rmd)
