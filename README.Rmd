@@ -13,7 +13,8 @@ editor_options:
 
 This repository contains data and code used for RIVM letter report
 2026-0069: Screening level ecological risk assessment of Microplastics
-in Dutch surface waters, DOI: 10.21945/RIVM-2026-0069.
+in Dutch surface waters, DOI:
+[10.21945/RIVM-2026-0069](https://doi.org/10.21945/RIVM-2026-0069).
 
 ## Use
 
@@ -77,7 +78,7 @@ The required data is partly made available in the folder
   to aligned particle concentrations using the alphas fitted in
   `02_ParticleDataPowerlawFit.Rmd.Rmd`, grouped per water body.
 - **`references.bib`**
-- **`Folder`**:
+- **Folders**:
   - **`rawdata`**: Contains raw data to be published on GitHub as part
     of an external export from this repo.
   - **`R`**: contains specific functions used in various places.
@@ -85,6 +86,8 @@ The required data is partly made available in the folder
     subfolder, **`Data.zip`** which contains the datasets generated with
     the code in this repository that was used for the results in RIVM
     report 2026-0069.
+  - **`env`**: yaml files for creating HPC conda environment.
+  - And the folders with figures for the different .md files.
 
 ### Parallel computing approach
 
@@ -130,10 +133,10 @@ Output is written to project_dir (as defined in `paths.R`) /Output
 ## Output of data and figures
 
 Harmonised measurement datasets are saved to output_dir (as defined in
-`paths.R`) /Data
+`paths.R`). Data and
 
-Figures are saved to output_dir (as defined in `paths.R`) /Figures,
-organized by topic in subfolders:
+figures are saved to output_dir (as defined in `paths.R`), organized by
+topic in subfolders:
 
 - Rescaled: output of the `03_NumberConcentrationRescaling.Rmd` script.
   Figures on rescaled concentrations.
