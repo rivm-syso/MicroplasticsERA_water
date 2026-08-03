@@ -15,7 +15,7 @@ contact:
   - email: joris.quik@rivm.nl
     name: "National Institute for Public Health and the Environment"
 repository-code: https://github.com/rivm-syso/MicroplasticsERA_water
-url: [PLACE HOLDER REPORT LINK]
+url: https://doi.org/10.21945/RIVM-2026-0069
 abstract: This code was created for RIVM report 2026-0069, in which a screening level ecological risk assessment of microplastics in Dutch surface waters was researched. 
 keywords:
   - RIVM
