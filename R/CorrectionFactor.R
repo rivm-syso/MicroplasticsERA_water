@@ -15,10 +15,6 @@
 #' F.Correctionfactor2(ULm = 10, LLm = 1, ULd = 20, LLd = 2, alpha = 2.5)
 #' @export
 ## Correction factor for powerlaw
-F.Correctionfactor <- function(ULm,LLm,ULd,LLd,alpha){
-  (ULd^(1-alpha)-LLd^(1-alpha))/(ULm^(1-alpha)-LLm^(1-alpha))
-}
-
 F.Correctionfactor2 <- function(ULm,LLm,ULd,LLd,alpha){
   D = integrate(f = poweRlaw::dplcon, lower = LLd, upper = ULd, 
                 alpha = alpha, xmin = LLd)
