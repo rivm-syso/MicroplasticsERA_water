@@ -42,7 +42,7 @@ raw_ftir_data <- readRDS(paste0(project_dir, output_dir,
 Below the mass data is read in. This chunk is not run because the input
 data is not publicly available.
 
-```{R Read in mass data, warning=F, message=F}
+```{R Read in mass data, warning=F, message=F, eval=F}
 # Read in the mass metadata
 Mass_MetaData <- read_excel(paste0(Input_dir, "/RWS_2025/readme.xlsx")) |>
   left_join(read_excel(paste0(Input_dir, "/RWS_2025/readme.xlsx"), sheet = "Locations")) |>
@@ -55,7 +55,7 @@ Mass_concentrations_PP <- read_rds(paste0(project_dir, output_dir, "Data/2026-07
 
 ## Suspended Particulate Matter
 
-```{r SPM, warning=F, message=F}
+```{r SPM, warning=F, message=F, eval=F}
 
 spm_data <- Mass_concentrations_PP |>
   select(Location_name, Sampling_date_from, Sampling_date_to, SPM_mg_L_median, SPM_mg_L_min, SPM_mg_L_max)
@@ -96,7 +96,7 @@ knitr::kable(spm_summary)
 
 Tis table is based on mass data, so the chunk is not run.
 
-```{R, warning=F, message=F}
+```{R, warning=F, message=F, eval=F}
 Mass_table_summary <- Mass_concentrations_PP |>
   left_join(Mass_MetaData) |>
   filter(!is.na(Sampling_method)) |>
@@ -133,13 +133,13 @@ knitr::kable(Mass_table_summary)
 
 ```{R, warning=F, message=F}
 particle_overview_table_conc <- particle_concentrations_total |>
-  group_by(River, Analysis_method, Data_source, Sampling_method,Lower_sampling_size_limit_um, Upper_sampling_size_limit_um) |>
+  group_by(River, Analysis_method, Data_source, Sampling_method,Lower_sampling_size_limit_um, Upper_sampling_size_limit_um, Total_QA_QC_score) |>
   summarise(average_sample_vol_L = mean(Sample_volume_L), 
             number_of_samples = n_distinct(Sample_ID),
             min_date = min(sampling_date, na.rm = TRUE),
             max_date = max(sampling_date, na.rm = TRUE),
             .groups = "drop") |>
-  select(River, min_date, max_date, number_of_samples, Sampling_method, average_sample_vol_L, Analysis_method, Lower_sampling_size_limit_um, Upper_sampling_size_limit_um, Data_source)
+  select(River, min_date, max_date, number_of_samples, Sampling_method, average_sample_vol_L, Analysis_method, Lower_sampling_size_limit_um, Upper_sampling_size_limit_um, Total_QA_QC_score, Data_source)
 
 particle_overview_table_raw <- raw_ftir_data |>
   group_by(River, Analysis_method, Data_source, Sampling_method,Lower_sampling_size_limit_um, Upper_sampling_size_limit_um) |>
@@ -149,9 +149,10 @@ particle_overview_table_raw <- raw_ftir_data |>
 
 particle_overview_table <- particle_overview_table_conc |>
   left_join(particle_overview_table_raw) |>
-    select(River, min_date, max_date, number_of_samples, Sampling_method, average_sample_vol_L, Analysis_method, Lower_sampling_size_limit_um, Upper_sampling_size_limit_um, Data_source)
+    select(River, min_date, max_date, number_of_samples, Sampling_method, average_sample_vol_L, Analysis_method, number_of_particles, Total_QA_QC_score, Lower_sampling_size_limit_um, Upper_sampling_size_limit_um, Data_source)
 
 knitr::kable(particle_overview_table)
+
 #openxlsx::write.xlsx(particle_overview_table, file = paste0(output_dir, "/Tables/Table_3_v2.xlsx"))
 ```
 

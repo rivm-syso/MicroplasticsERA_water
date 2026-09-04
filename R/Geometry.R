@@ -29,7 +29,6 @@ calc_volume_CSF <- function(shape,length,diameter,CSF){
 
 calc_volume_CSF2 <- function(shape,length,diameter,CSF){
   
-  
   case_when(shape == "Sphere" ~ (4/3 * pi * (0.5 * length)^3)  ,
             shape == "Fiber" ~ (pi * (0.5 * diameter )^2 * length),
             .default = (pi *(length)^3 * (CSF)^2 )/6)
@@ -57,9 +56,9 @@ Volume.ellipsoid<- function(l,w,h){
 
 Surface.ellipsoid<-function(a,b,c,p){
   # P is usually 1.6
-  # a = length /2 (radius dus)
-  # b = widht/ 2 (radius dus)
-  # c = height/ 2 (radius dus)
+  # a = length /2 (like radius)
+  # b = widht/ 2 (like radius)
+  # c = height/ 2 (like radius)
   
   sa<- 4*pi*(((a*b)^p+(a*c)^p+(b*c)^p)/3)^(1/p)
   return(sa)
@@ -67,7 +66,7 @@ Surface.ellipsoid<-function(a,b,c,p){
 
 
 Volume.sphere <- function(r){
-  result<- as.numeric(4/3*pi*r^2)
+  result<- as.numeric(4/3*pi*r^3)
   return(result)
 }
 
@@ -81,8 +80,6 @@ Volume.cilinder<- function(shortest,longest){
   result <- as.numeric((shortest/2)^2 * pi * longest)
   return(result)
 }
-
-"fiber" ~ 2 * pi * shortest_side_um/2 * (shortest_side_um/2 + longest_side_um)
 
 Surface.cilinder<- function(shortest,longest){
   result<- as.numeric(2*pi*shortest/2 * (shortest/2 + longest))

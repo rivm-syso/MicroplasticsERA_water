@@ -5,7 +5,8 @@ README
 
 This repository contains data and code used for RIVM letter report
 2026-0069: Screening level ecological risk assessment of Microplastics
-in Dutch surface waters, DOI: 10.21945/RIVM-2026-0069.
+in Dutch surface waters, DOI:
+[10.21945/RIVM-2026-0069](https://doi.org/10.21945/RIVM-2026-0069).
 
 ## Use
 
@@ -32,7 +33,7 @@ The required data is partly made available in the folder
   related packages.
 
 - **`paths.R`**: Script to define your local input and output
-  directories.\
+  directories.  
   It should set the following variables:
 
   - `project_dir`: main output directory (e.g.,
@@ -46,38 +47,43 @@ The required data is partly made available in the folder
 
 ### Overview of files and folders
 
-- **`01_ParticleDataPrep.Rmd`**: Make a harmonized dataset for
-  microplastic particle number measurements using raw particle counting
-  data, reported number concentrations and other studies specific
-  metadata.
-- **`02_ParticleDataPowerlawFit.Rmd`**: Fit power laws on particle
-  measurement data prepared in `01a_ParticleDataPrep.Rmd` using a
-  parallel computing approach specific to RIVM.
+- [**`01_ParticleDataPrep.Rmd`**](01_ParticleDataPrep.md "01_ParticleDataPrep"):
+  Make a harmonized dataset for microplastic particle number
+  measurements using raw particle counting data, reported number
+  concentrations and other studies specific metadata.
+- [**`02_ParticleDataPowerlawFit.Rmd`**](02_ParticleDataPowerlawFit.md "02_ParticleDataPowerlawFit"):
+  Fit power laws on particle measurement data prepared in
+  `01a_ParticleDataPrep.Rmd` using a parallel computing approach
+  specific to RIVM.
 - **`02b_HPCrunPowerlawFit.R`**: converts
   `02a_ParticleDataPowerlawFit.Rmd` to an R-script, making it possible
   to run the script on the High Performance Cluster at RIVM.
-- **`03_NumberConcentrationRescaling.Rmd`**: Corrects the particle
-  number concentrations using the alphas fitted in
+- [**`03_NumberConcentrationRescaling.Rmd`**](03_NumberConcentrationRescaling.md "03_NumberConcentrationRescaling"):
+  Corrects the particle number concentrations using the alphas fitted in
   `02_ParticleDataPowerlawFit.Rmd`, grouped per water body.
-- **`04_FiguresReportedMeasurements.Rmd`**: Script to make figures for
-  measurement data.
-- **`05_ReportTables.Rmd`**: Script to make tables for measurement data.
-- **`06_MassDataPrep.Rmd`**: Make a harmonized dataset for microplastic
-  mass concentrations from reported mass concentration and study
-  specific metadata as required to derive surfacewater microplastic
-  particle number concentrations.
-- **`07_MassConcentrationAlignment.Rmd`**: Converts mass concentrations
-  to aligned particle concentrations using the alphas fitted in
-  `02_ParticleDataPowerlawFit.Rmd.Rmd`, grouped per water body.
+- [**`04_FiguresReportedMeasurements.Rmd`**](04_FiguresReportedMeasurements.md "04_FiguresReportedMeasurements"):
+  Script to make figures for measurement data.
+- [**`05_ReportTables.Rmd`**](05_ReportTables.md "05_ReportTables"):
+  Script to make tables for measurement data.
+- [**`06_MassDataPrep.Rmd`**](06_MassDataPrep.md "06_MassDataPrep"):
+  Make a harmonized dataset for microplastic mass concentrations from
+  reported mass concentration and study specific metadata as required to
+  derive surfacewater microplastic particle number concentrations.
+- [**`07_MassConcentrationAlignment.Rmd`**](07_NumberFromMassConcentration.md "07_NumberFromMassConcentration"):
+  Converts mass concentrations to aligned particle concentrations using
+  the alphas fitted in `02_ParticleDataPowerlawFit.Rmd.Rmd`, grouped per
+  water body.
 - **`references.bib`**
-- **`Folder`**:
-  - **`rawdata`**: Contains raw data to be published on GitHub as part
-    of an external export from this repo.
+- **Folders**:
+  - [**`rawdata`**](rawdata): Contains raw data to be published on
+    GitHub as part of an external export from this repo.
   - **`R`**: contains specific functions used in various places.
-  - **`Output`**: folder for the output. It also contains a zipped
-    subfolder, **`Data.zip`** which contains the datasets generated with
-    the code in this repository that was used for the results in RIVM
-    report 2026-0069.
+  - [**`Output`**](Output): folder for output of data and figures. Here
+    it contains the main dataset of reported and rescaled microplastics
+    concentrations along with the output of the alpha fits as was used
+    for RIVM report 2026-0069.
+  - **`env`**: yaml files for creating HPC conda environment.
+  - And the folders with figures for the different .md files.
 
 ### Parallel computing approach
 
@@ -123,10 +129,10 @@ Output is written to project_dir (as defined in `paths.R`) /Output
 ## Output of data and figures
 
 Harmonised measurement datasets are saved to output_dir (as defined in
-`paths.R`) /Data
+`paths.R`). Data and
 
-Figures are saved to output_dir (as defined in `paths.R`) /Figures,
-organized by topic in subfolders:
+figures are saved to output_dir (as defined in `paths.R`), organized by
+topic in subfolders:
 
 - Rescaled: output of the `03_NumberConcentrationRescaling.Rmd` script.
   Figures on rescaled concentrations.
