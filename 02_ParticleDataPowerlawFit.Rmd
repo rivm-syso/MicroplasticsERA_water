@@ -1,0 +1,467 @@
+---
+title: "02_ParticleDataPowerlawFit"
+output: github_document
+editor_options: 
+  chunk_output_type: console
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(tidyverse)
+library(poweRlaw)
+library(ggplot2)
+library(readxl)
+library(stringr)
+library(parallel)
+```
+
+# About
+
+This file is the base file for the fitting a powerlaw to the particle data. This is done on a high performance computing cluster (HPC). In order to run this code on the hpc the file "02_HPCrunPowerlawFit.R" should be executed from the home directory of the project.
+
+The R code in this .Rmd file will be extracted using the knitr::purl function and placed in the purl folder. Then the script will run the code.
+
+## Running the HPC job
+
+In order to run the HPC job please use the following command:
+
+> \*bsub -q bio -n 40 -W 50 -o ./hpcmessage/Output\_%J.out -e ./hpcmessage/Output\_%J.err Rscript 02_HPCrunPowerlawFit.R
+
+where
+
+- n = the amount of cores (make sure they are set correctly in the 02_HPCrunPowerlawFit.R script)
+
+- W = the max time of the hpc job (15-25 minutes for 3 bootstraps \@20 cores)
+
+# Code
+
+## Load proper settings
+
+We load the config.R file which sets the amount of cores and iterations, as well as loads the paths.R file which sets the paths to the project directories.
+
+For the results in the report we used 1000 runs.
+
+```{r settings}
+# Use config.R to set some initial variables
+# Set environment (OOD or HPC)
+# Set directory (dir)
+# Set number of cores (n_cores)
+# Set cores_per_dataset
+# Parameters needed for fitting power law
+
+# Load paths file to load all the directories
+source("./paths.R")
+
+# Number of bootstraps
+number_of_simulations <- 2 #change to 1000
+
+# Number of cores for the for loop calculation(older)
+n_cores <- 1 #make sure they are available
+
+# Chosen polymer, set to "All" as a default, otherwise polymer name in lower case letters
+selected_polymer <- "All" 
+```
+
+# Import data
+
+Import the Raw_FTIR_Data.rds file (generated using the 1_ParticleDataPrep.Rmd file) into the environment.
+
+```{R Import data}
+# Define raw data version
+DataVersion <- "2026-07-07" 
+
+Particle_data <- read_rds(paste0(output_dir,"Data/", DataVersion, "Raw_FTIR_data.rds")) 
+
+unique(Particle_data$Polymer_name)
+
+if(tolower(selected_polymer) != "all"){
+  
+  selected_polymer <- tolower(selected_polymer)  
+
+  Particle_data <- Particle_data[grepl(selected_polymer, Particle_data$Polymer_name, ignore.case = TRUE), ]
+}
+
+Particle_data <- Particle_data |>
+  filter(!is.na(longest_side_um))
+```
+
+# Fit power law per river
+
+Datasets aggregated per river. We run fit using parallel computing. The script automatically assigns the correct number of cores based on the config and the amount of rivers present in the dataset. Store results in results (a list)
+
+We perform the fits for:
+
+- Length (longest)
+- Width (shortest)
+- Volume
+
+## PowerLaw fit function
+
+The fitPowerlaw function used is developed by Qui et al. (in prep). The function, updated from the one developed earlier ([@kooi2021]) is under embargo until the publication is ready. Until then the original can be used. See below.
+
+```{r fitPowerlaw}
+# source("./R/powerlawV2.R") # under embargo
+
+fitPowerlaw <- function(data,colname,number_of_simulations,
+                        cutoff = NA,
+                        n_threads = NA){
+
+
+  #Create dataframe from input
+  df.powerlaw <- data
+ 
+  #Cutoff at 5000
+  df.powerlaw <-df.powerlaw %>%
+    filter(df.powerlaw[[colname]]<=5000)
+  
+  #Find xmax of dataset
+    xmaxval <- max(df.powerlaw[[colname]])
+
+  # Create object
+  obj.pl <- conpl$new(df.powerlaw[[colname]])
+  est.obj = estimate_xmin(obj.pl)
+  
+  #Set xmin
+  obj.pl$setXmin(est.obj)
+  
+  # parameters ophalen (alpha)
+  obj.param=estimate_pars(obj.pl)
+  
+  #plot(obj.pl)
+  #lines(obj.pl,col = "red")
+  
+  
+  ## Estimate parameters alpha and xmin
+## Use bootstrap, every fit is slightly different. 
+## no_of_sims (number of simulations e.g. 100, but takes time)
+## More info in Newman, 2005
+  
+  bs <- bootstrap(obj.pl, no_of_sims = number_of_simulations, threads = 1, xmax = xmaxval) 
+bs.res <- bs$bootstraps
+  
+### Create list of mean and sdev for xmin and alpha for further modeling
+list.xmin <-list(mean = mean(bs.res$xmin),
+                 sdev = sd(bs.res$xmin))
+  
+list.alpha <- list(mean = mean(bs.res$pars),
+                   sdev = sd(bs.res$pars))
+
+
+pl.stats <- list(xmin = list.xmin, alpha = list.alpha,bs = bs)
+
+return(pl.stats)
+
+}
+```
+
+## Separate LDIR and FTIR data
+
+We must separate all LDIR data from FTIR data and perform separate fits for both.
+
+```{R split LDIR and FTIR}
+FTIR<-Particle_data|>
+  filter(Analysis_method!="LDIR")
+
+LDIR<-Particle_data|>
+  filter(Analysis_method=="LDIR")
+
+unique(Particle_data$River)
+rm(Particle_data) 
+```
+
+## Fit FTIR data per river
+
+```{R Fit Rivers FTIR}
+rivers <- unique(FTIR$River)
+ 
+datasets <- lapply(rivers, function(river) {
+  FTIR |> filter(River == !!river)
+})
+
+names(datasets) <- rivers
+
+### Aggregate all rivers together:
+datasets$All<-FTIR|>
+  mutate(River=="All")
+
+#Store new name in rivers
+rivers[length(rivers)+1]<-"All"
+
+nrivers<-length(datasets) 
+
+## Find number of cores to use on the parallel river calculation (note that this code can at maximum run rivers< cores, using 1 core per river)
+useCores<-case_when(floor(n_cores/nrivers)==0 ~ 1,
+                    TRUE~ floor(n_cores/nrivers))
+
+cl <- makeCluster(length(datasets))
+
+## Create parallel cluster and pass parameters/ data
+clusterExport(cl, varlist = c("fitPowerlaw","datasets", "number_of_simulations", "useCores"))
+clusterEvalQ(cl, { library(poweRlaw); library(dplyr); library(ggplot2) })
+
+resultsFTIR <- parLapply(cl, seq_along(datasets), function(i) {
+
+  d <- datasets[[i]]
+  river <- names(datasets)[i]
+  
+  longest <- fitPowerlaw(
+    data = d,
+    colname = "longest_side_um",
+    number_of_simulations = number_of_simulations,
+    cutoff = NA,
+    n_threads = useCores
+  )
+  
+  shortest <- fitPowerlaw(
+    data = d,
+    colname = "shortest_side_um",
+    number_of_simulations = number_of_simulations,
+    cutoff = NA,
+    n_threads = useCores
+  )
+  
+  volume <- fitPowerlaw(
+    data=d,
+    colname = "volumeCalculated",
+    number_of_simulations = number_of_simulations,
+    cutoff = NA,
+    n_threads= useCores
+  )
+
+  list(river = river, longest = longest, shortest = shortest, volume = volume)
+  
+})
+names(resultsFTIR) <- rivers
+
+stopCluster(cl)
+```
+
+## Fit LDIR data per river
+
+```{R Fit rivers LDIR}
+rivers<- unique(LDIR$River)
+
+datasetsLDIR <- lapply(rivers, function(river) {
+  LDIR |> filter(River == !!river)
+})
+
+names(datasetsLDIR) <- rivers
+
+### Aggregate all rivers:
+datasetsLDIR$All<-LDIR|>
+  mutate(River=="All")
+
+# Add new name to rivers object
+rivers[length(rivers)+1]<-"All"
+
+nrivers<-length(datasetsLDIR) 
+
+## Find number of cores to use on the parallel river calculation (note that this code can at maximum run rivers< cores, using 1 core per river)
+
+useCores<-case_when(floor(n_cores/nrivers)==0 ~ 1,
+                    TRUE~ floor(n_cores/nrivers))
+
+cl <- makeCluster(length(datasetsLDIR))
+
+## Create parallel cluster and pass parameters/ data
+clusterExport(cl, varlist = c("fitPowerlaw","datasetsLDIR", "number_of_simulations", "useCores"))
+clusterEvalQ(cl, { library(poweRlaw); library(dplyr); library(ggplot2) })
+
+resultsLDIR <- parLapply(cl, seq_along(datasetsLDIR), function(i) {
+  d <- datasetsLDIR[[i]]
+  river <- names(datasetsLDIR)[i]
+  
+  longest <- fitPowerlaw(
+    data = d,
+    colname = "longest_side_um",
+    number_of_simulations = number_of_simulations,
+    cutoff = NA,
+    n_threads = useCores
+  )
+  
+  shortest <- fitPowerlaw(
+    data = d,
+    colname = "shortest_side_um",
+    number_of_simulations = number_of_simulations,
+    cutoff = NA,
+    n_threads = useCores
+  )
+  
+  volume <- fitPowerlaw(
+    data=d,
+    colname = "volumeCalculated",
+    number_of_simulations = number_of_simulations,
+    cutoff = NA,
+    n_threads= useCores
+  )
+
+  list(river = river, longest = longest, shortest = shortest, volume = volume)
+
+  })
+names(resultsLDIR) <- rivers
+
+stopCluster(cl)
+```
+
+# Generate plots
+
+There is some trouble with parallel computing and GGplot. Here is the function we use to generate plots, but we will not do it in this .Rmd file on the HPC server. We should use the file "02b_PowerlawFitPlots.Rmd" to generate the plots after the fact.
+
+# Generate alpha dataframe for export
+
+Using the object results we generate a dataframe from the fit output containing alphas and xmin values.
+
+## FTIR
+
+```{R Output fit FTIR}
+fitFTIR <- data.frame(id = character(),param = character(),alpha = numeric(),alphaSd = numeric(),alphaUpper = numeric(),alphaLower=numeric(),xmin = numeric(),xminSd = numeric(),xminUpper=numeric(),xminLower=numeric())
+
+## For loop over the result list to create an alpha dataframe
+for(nm in names(resultsFTIR)){
+  
+  item <- resultsFTIR[[nm]]
+  
+  fitFTIR <- rbind(
+    fitFTIR,
+    data.frame(
+      id = nm,
+      param = "longest",
+      alpha = item$longest$alpha,
+      alphaMean = mean(item$longest$bs.obj$pars),
+      alphaSd = item$longest$alpha_sd,
+      alpha_upper = item$longest$alpha_conf_interval[["97.5%"]],
+      alpha_lower = item$longest$alpha_conf_interval[["2.5%"]],
+      xmin = item$longest$xmin,
+      xminMean=mean(item$longest$bs.obj$xmin),
+      xminSd = item$longest$xmin_sd,
+      xmin_upper = item$longest$xmin_conf_interval[["97.5%"]],
+      xmin_lower = item$longest$xmin_conf_interval[["2.5%"]],
+
+      stringsAsFactors = FALSE
+    )
+  )
+  
+  # Shortest
+  fitFTIR <- rbind(
+    fitFTIR,
+    data.frame(
+      id = nm,
+      param = "shortest",
+      alpha = item$shortest$alpha,
+      alphaMean = mean(item$longest$bs.obj$pars),
+      alphaSd = item$shortest$alpha_sd,
+      alpha_upper = item$shortest$alpha_conf_interval[["97.5%"]],
+      alpha_lower = item$shortest$alpha_conf_interval[["2.5%"]],
+      xmin = item$shortest$xmin,
+      xminMean=mean(item$shortest$bs.obj$xmin),
+      xminSd = item$shortest$xmin_sd,
+      xmin_upper = item$shortest$xmin_conf_interval[["97.5%"]],
+      xmin_lower = item$shortest$xmin_conf_interval[["2.5%"]],
+      stringsAsFactors = FALSE
+    )
+  )
+  
+  #volume
+  fitFTIR <- rbind(
+    fitFTIR,
+    data.frame(
+      id = nm,
+      param = "volume",
+      alpha = item$volume$alpha,
+      alphaMean = mean(item$volume$bs.obj$pars),
+      alphaSd = item$volume$alpha_sd,
+      alpha_upper = item$volume$alpha_conf_interval[["97.5%"]],
+      alpha_lower = item$volume$alpha_conf_interval[["2.5%"]],
+      xmin = item$volume$xmin,
+      xminMean=mean(item$volume$bs.obj$xmin),
+      xminSd = item$volume$xmin_sd,
+      xmin_upper = item$volume$xmin_conf_interval[["97.5%"]],
+      xmin_lower = item$volume$xmin_conf_interval[["2.5%"]],
+      stringsAsFactors = FALSE
+    )
+  )
+}
+```
+
+## LDIR
+
+```{R Output fit LDIR}
+fitLDIR<-data.frame(id = character(),param = character(),alpha = numeric(),alphaSd = numeric(),alphaUpper = numeric(),alphaLower=numeric(),xmin = numeric(),xminSd = numeric(),xminUpper=numeric(),xminLower=numeric())
+
+## For loop over the result list to create an alpha dataframe
+for(nm in names(resultsLDIR)){
+  item<-resultsLDIR[[nm]]
+  
+  fitLDIR <- rbind(
+    fitLDIR,
+    data.frame(
+      id = nm,
+      param = "longest",
+      alpha = item$longest$alpha,
+      alphaMean = mean(item$longest$bs.obj$pars),
+      alphaSd = item$longest$alpha_sd,
+      alpha_upper = item$longest$alpha_conf_interval[["97.5%"]],
+      alpha_lower = item$longest$alpha_conf_interval[["2.5%"]],
+      xmin = item$longest$xmin,
+      xminMean=mean(item$longest$bs.obj$xmin),
+      xminSd = item$longest$xmin_sd,
+      xmin_upper = item$longest$xmin_conf_interval[["97.5%"]],
+      xmin_lower = item$longest$xmin_conf_interval[["2.5%"]],
+
+      stringsAsFactors = FALSE
+    )
+  )
+  
+  # Shortest
+  fitLDIR <- rbind(
+    fitLDIR,
+    data.frame(
+      id = nm,
+      param = "shortest",
+      alpha = item$shortest$alpha,
+      alphaMean = mean(item$longest$bs.obj$pars),
+      alphaSd = item$shortest$alpha_sd,
+      alpha_upper = item$shortest$alpha_conf_interval[["97.5%"]],
+      alpha_lower = item$shortest$alpha_conf_interval[["2.5%"]],
+      xmin = item$shortest$xmin,
+      xminMean=mean(item$shortest$bs.obj$xmin),
+      xminSd = item$shortest$xmin_sd,
+      xmin_upper = item$shortest$xmin_conf_interval[["97.5%"]],
+      xmin_lower = item$shortest$xmin_conf_interval[["2.5%"]],
+      stringsAsFactors = FALSE
+    )
+  )
+  
+  #volume
+  fitLDIR <- rbind(
+    fitLDIR,
+    data.frame(
+      id = nm,
+      param = "volume",
+      alpha = item$volume$alpha,
+      alphaMean = mean(item$volume$bs.obj$pars),
+      alphaSd = item$volume$alpha_sd,
+      alpha_upper = item$volume$alpha_conf_interval[["97.5%"]],
+      alpha_lower = item$volume$alpha_conf_interval[["2.5%"]],
+      xmin = item$volume$xmin,
+      xminMean=mean(item$volume$bs.obj$xmin),
+      xminSd = item$volume$xmin_sd,
+      xmin_upper = item$volume$xmin_conf_interval[["97.5%"]],
+      xmin_lower = item$volume$xmin_conf_interval[["2.5%"]],
+      stringsAsFactors = FALSE
+    )
+  )
+}
+```
+
+# Save results
+
+We save results as an .Rds so we can load all the bootstrap results and generate plots. We also save the dataframe with alphas as powerlawFit.csv
+
+```{R Save results, eval=FALSE, include=TRUE}
+write.csv(fitFTIR, paste0(project_dir, output_dir,"Data/powerlawFitFTIR_", selected_polymer, Sys.Date(),".csv"))
+write.csv(fitLDIR, paste0(project_dir, output_dir,"Data/powerlawFitLDIR_", selected_polymer, Sys.Date(),".csv"))
+saveRDS(resultsFTIR, paste0(project_dir, output_dir,"Data/resultsFTIR_", selected_polymer, Sys.Date(),".Rds"))
+saveRDS(resultsLDIR, paste0(project_dir, output_dir,"Data/resultsLDIR_", selected_polymer, Sys.Date(),".Rds"))
+```

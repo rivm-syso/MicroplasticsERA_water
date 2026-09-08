@@ -1,0 +1,1423 @@
+03_NumberConcentrationRescaling
+================
+
+Create folders for figures if they do not yet exist
+
+``` r
+concentrations_dir <- paste0(output_dir, "Figures/Rescaled")
+
+if (!dir.exists(concentrations_dir)) {
+  dir.create(concentrations_dir, recursive = TRUE)
+}
+
+alphas_dir <- paste0(output_dir, "Figures/Alphas")
+
+if (!dir.exists(alphas_dir)) {
+  dir.create(alphas_dir, recursive = TRUE)
+}
+```
+
+# Import data
+
+## Load concentrations
+
+The below data is read in from raw data provided by respective data
+owners. This is done using ParticleDataPrep.Rmd.
+
+``` r
+DataVersionConc <- "2026-07-07"
+
+# if data is not available, then unzip this file
+# unzip(zipfile = paste0(project_dir, output_dir,"Data.zip"),
+      # exdir = output_dir)
+
+concentrations <- readRDS(paste0(project_dir, output_dir,"Data/",DataVersionConc,"Particle_concentrations_total.rds"))
+
+# Exclude samples from Mintenig (2020)  which were indicated only for MP > 300 um.
+concentrations <- concentrations |>
+  filter(!endsWith(Location_name,"*"))
+```
+
+## Load alphas
+
+The powerlawfit.csv files are generated using the parallel.Rmd script.
+These are the results from a HPC run using said script.
+
+TODO: please provide versions for the powerlawFit and powerlawFitLDIR
+which correspond to versions of the Parallel script. Also, the Output
+directory is confusing here.
+
+``` r
+DataVersionPowerlawFTIR <- "2026-06-30"
+
+alphasFITR<-read.csv(paste0("/data/BioGrid/hidsa/ERAwater_biogrid/Output/Data/powerlawFitFTIR_All",DataVersionPowerlawFTIR,".csv"))
+
+DataVersionPowerlawLDIR <- "2026-04-09"
+
+alphasLDIR<-read.csv(paste0(project_dir, output_dir,"Data/powerlawFitLDIR_All",DataVersionPowerlawLDIR,".csv"))
+```
+
+Join together and denote which is FTIR and which LDIR (could probably do
+this in the exporting in parallel.Rmd)
+
+``` r
+alphas <- alphasFITR|>
+  mutate(Analysis_method = "ATR-FTIR and Micro-FTIR")|>
+  bind_rows(alphasLDIR|>
+              mutate(Analysis_method = "LDIR"))
+
+rm(alphasFITR,
+   alphasLDIR)  
+```
+
+# Rescale concentrations
+
+Below we rescale the reported concentrations per river.
+
+## Per measurement
+
+### Join concentrations with detection limits
+
+Join concentrations and detection limits etc. in with the alphas and
+filter out aggregated datasets.
+
+> Note by joining this way we lose all samples from Leslie because no
+> Alpha was derived for this (it has no corresponding river)
+
+``` r
+ConcPSD <- concentrations|>
+  filter(!is.na(River))|>
+  left_join(alphas |> # leaves out the ones where id == All
+              select(id,
+                     param,
+                     alpha,
+                     alpha_lower,
+                     alpha_upper,
+                     Analysis_method),
+            by = c("River" = "id",
+                   "Analysis_method" = "Analysis_method"),
+            relationship = "many-to-many")|>
+  filter(!Analysis_method=="Light microscopy")
+
+rm(concentrations)
+```
+
+### Perform rescaling
+
+We rescale each measurement using the alpha for the applicable water
+body. We distinguish between LDIR and FTIR measurements and use alphas
+derived from fits using data corresponding to the analysis method. (LDIR
+data uses an LDIR alpha)
+
+The uncertainty in the fit of the alpha and uncertainty in the Lmin and
+Lmax are included as follows:
+
+- A triangular distribution is used based on the fitted alpha and its CI
+- A triangle distribution is used for Lmin and Lmax with a 20%
+  uncertainty, with a minimum of 1 micrometer and maximum of 5000
+  micrometer.
+
+``` r
+# Function for creating the uncertain data
+fAlignUncertain <- function(
+    ConcAlphaCombined, # data frame/tibble with specific concentration and alpha data
+    nRuns = 100, # number of runs
+    SizeLimitLowerUmin = 0.1, #fraction af increase of the size limit
+    SizeLimitLowerUmax = 0.1, #fraction af increase of the size limit
+    SizeLimitUpperUmin = 0.1, #fraction af increase of the size limit
+    SizeLimitUpperUmax = 0.1, #fraction af increase of the size limit
+    SizeParameter = "longest" # can be longest or shortest for fit of alpha
+    ){ #
+
+    ConcAlphaCombined |>
+    filter(param == SizeParameter) |> 
+    mutate(LowerSamplingSizeLimit_um_Tlowl = 
+             ifelse(((1-SizeLimitLowerUmin)*Lower_sampling_size_limit_um) > 1,
+                      ((1-SizeLimitLowerUmin)*Lower_sampling_size_limit_um), 1),
+           LowerSamplingSizeLimit_um_Tupl = 
+             (1+SizeLimitLowerUmax)*Lower_sampling_size_limit_um,
+           UpperSamplingSizeLimit_um_Tlowl = 
+             (1-SizeLimitUpperUmin)*Upper_sampling_size_limit_um,
+           UpperSamplingSizeLimit_um_Tupl =
+             ifelse(((1+SizeLimitUpperUmax)*Upper_sampling_size_limit_um) < 5000,
+                    ((1+SizeLimitUpperUmax)*Upper_sampling_size_limit_um), 5000)
+    ) |> 
+    rowwise()|>
+    mutate(
+  alpha_lower = ifelse(alpha < alpha_lower, alpha, alpha_lower),
+  alpha_upper = ifelse(alpha > alpha_upper, alpha, alpha_upper),
+  check_alpha = (alpha_lower <= alpha & alpha <= alpha_upper)
+) |>
+    mutate(
+      UncertainVariables = list(tibble(
+        triangle_alpha = triangle::rtriangle(
+          n = nRuns,
+          a = alpha_lower,
+          b = alpha_upper,
+          c = alpha
+        ),
+        triangle_sampling_lower =
+          triangle::rtriangle(
+            n= nRuns,
+            a= LowerSamplingSizeLimit_um_Tlowl,
+            b= LowerSamplingSizeLimit_um_Tupl,
+            c= Lower_sampling_size_limit_um
+          ),
+        triangle_sampling_upper = triangle::rtriangle(
+          n= nRuns,
+          a= UpperSamplingSizeLimit_um_Tlowl,
+          b= UpperSamplingSizeLimit_um_Tupl,
+          c= Upper_sampling_size_limit_um
+        ),
+        UncId = c(1:nRuns)
+      ))
+    )|> unnest(UncertainVariables)
+}
+
+ConcAlphaUncertain <- 
+  fAlignUncertain(
+    ConcAlphaCombined = ConcPSD, 
+    nRuns = 1000,
+    SizeParameter = "longest")
+```
+
+### Align using triangle distribution in alpha
+
+Because the correction factor (CF) is not calculated linearly we use
+Monte Carlo simulations to approximate the error.
+
+We pull a triangular distribution of alphas from the measured alpha and
+the 5th and 95h CI. Then we calculate a corrected value for each
+iteration.
+
+> We cannot use the bootstrapped alpha values here to derive the
+> uncertainty as they are only used to derive the uncertainty and test
+> the accuracy of the fit. It is also the reason you do not use
+> alphaMean
+
+We also already prepare here the triangle distribution of the upper and
+lower sampling limits using a 20% spread of the reported value and a
+triangle distribution.
+
+Calculate the correction factor per simulation:
+
+``` r
+ConcAlphaAlignedUncertain <-
+  ConcAlphaUncertain |> 
+  mutate(CF_option2 = # not used in the report
+           F.Correctionfactor(Upper_sampling_size_limit_um, # fixed Upper
+                              Lower_sampling_size_limit_um, # fixed Lower
+                              5000,
+                              1,
+                              triangle_alpha))|>
+  mutate(concentrationOption2 = CF_option2*
+           concentration) |> 
+  mutate(CF_option3 = 
+           F.Correctionfactor(triangle_sampling_upper,
+                              triangle_sampling_lower,
+                              5000,
+                              1,
+                              triangle_alpha))|>
+  mutate(concentrationOption3 = CF_option3*
+           concentration)
+
+ConcAlphaAlignedUncertain_L <-
+  ConcAlphaAlignedUncertain |> 
+  rename(reported = concentration) |> 
+  pivot_longer(
+    cols = c(reported,concentrationOption2,concentrationOption3),
+    names_to = "OptionType",
+    values_to = "concentration"
+  )
+
+rm(ConcAlphaUncertain)
+
+ConcAlphaAlignedUncertain_L |> distinct(Data_source)
+```
+
+    ## # A tibble: 5 × 1
+    ##   Data_source                          
+    ##   <chr>                                
+    ## 1 Bäuerlein et al. (2022)              
+    ## 2 Bäuerlein et al. (2023)              
+    ## 3 Mintenig et al. (2020)               
+    ## 4 Mintenig, Hunnestad & Koelmans (2025)
+    ## 5 Mughini-Gras et al. (2021)
+
+Optional: save the rescaled concentrations
+
+# Prepare for plotting
+
+## Define plot themes
+
+### Violin plots
+
+Define variables needed for plotting
+
+``` r
+plot_theme = theme(
+  plot.title = element_text(size = 26, face = "bold"),           
+  plot.subtitle = element_text(size = 26),                       
+  axis.title.x = element_text(size = 22),
+  axis.title.y = element_text(size = 22),
+  axis.text = element_text(size = 22),
+  legend.text = element_text(size = 22),
+  plot.background = element_rect(fill = 'white'),
+  panel.background = element_rect(fill = 'white'),
+  axis.line = element_line(color='black'),
+  plot.margin = margin(2, 4, 2, 2, "cm"),
+  panel.grid.major.x = element_blank(),
+  panel.grid.major.y = element_line(colour = "grey", linewidth = 0.5),
+)
+```
+
+### Correction factor plots
+
+``` r
+plot_theme_CF = theme(
+  plot.title = element_text(size = 26, face = "bold"),           
+  plot.subtitle = element_text(size = 26),                       
+  axis.title.x = element_text(size = 22),
+  axis.title.y = element_text(size = 22),
+  axis.text = element_text(size = 22),
+  legend.text = element_text(size = 22),
+  plot.background = element_rect(fill = 'white'),
+  panel.background = element_rect(fill = 'white'),
+  axis.line = element_line(color='black'),
+  plot.margin = margin(2, 4, 2, 2, "cm"),
+  panel.grid.major.y = element_blank(),
+  panel.grid.major.x = element_line(colour = "grey", linewidth = 0.5),
+)
+```
+
+### Plot colors
+
+``` r
+river_colors <- c(
+  "Meuse" = "#00be6c",
+  "Lek canal" = "#BB9D00",
+  "Overijsselse vecht" = "#00A5FF",
+  "WWTP Werverschoof effluent canal" = "#7570b3",
+  "WWTP Werverschoof\neffluent canal" = "#7570b3",
+  "WWTP canal*"= "#7570b3",
+  "Dommel" = "#F8766D",
+  "Rhine" = "#e76bf3"
+)
+```
+
+## Read in HC5 values
+
+Read in PSSD++ from @coffin2026 values for figures
+
+``` r
+pssds <- read_excel(paste0(Input_dir, "/Coffin_PSSDs.xlsx")) |>
+  mutate(particles_per_m3 = particles_per_L*1000) 
+
+# Select only tier 3 values
+tier3 <- pssds |>
+  filter(Tier == 3) |>
+  select(-c(Tier, ERM, Environment))
+
+# Make a list of tier 3 values
+tier3_list <- tier3 |>
+  group_by(Method) |>
+  summarise(metrics = list(
+    setNames(particles_per_m3, Metric)
+  )) |>
+  deframe()
+```
+
+## Function for violin plot of concentrations compared to HC5
+
+``` r
+options <- c("Rescaled (v_o2)", "Rescaled (v_o3)", "Reported concentrations") 
+option_labels <- c("concentrationOption2" = "Uncertainty in alpha", "concentrationOption3" = "Uncertainty in alpha and detection limit", "reported" = "Reported concentrations") 
+
+plot_facet_option <- function(
+  df,
+  option,
+  tier_list,
+  option_labels,
+  plot_theme,
+  tier_select = c("Volume ERM", "Surface area ERM")
+) {
+  # Data selecteren
+  if (option %in% c("concentrationOption2", "concentrationOption3")) {
+    data_plot <- dplyr::filter(df, OptionType == option)
+    geom_layer <- ggplot2::geom_violin(
+      mapping = ggplot2::aes(
+        x = concentration,
+        y = forcats::fct_reorder(Sample_ID, concentration, .fun = median),
+        fill = River,
+        color = River
+      ),
+      color = NA
+    )
+    xlabel = expression("Rescaled concentration (#/m"^3*")")
+  } else if (option == "reported") {
+    data_plot <- dplyr::filter(df, OptionType == option)
+    geom_layer <- ggplot2::geom_point(
+      mapping = ggplot2::aes(
+        x = concentration,
+        y = forcats::fct_reorder(Sample_ID, concentration, .fun = median),
+        color = River
+      ),
+      shape = 16,
+      size = 3
+    )
+    xlabel = expression("Reported concentration (#/m"^3*")")
+  } else {
+    stop("Onbekende optie")
+  }
+
+  facet_title <- option_labels[[option]]
+
+  p <- ggplot2::ggplot(data = data_plot)
+
+  # Gearceerde gebieden toevoegen
+  if ("Volume ERM" %in% tier_select) {
+    p <- p +
+      ggplot2::annotate(
+        "rect",
+        xmin = tier_list$`Food dilution`["Q5"],
+        xmax = tier_list$`Food dilution`["Q95"],
+        ymin = -Inf,
+        ymax = Inf,
+        fill = ggplot2::alpha("blue", 0.1),
+        color = NA
+      )
+  }
+  if ("Surface area ERM" %in% tier_select) {
+    p <- p +
+      ggplot2::annotate(
+        "rect",
+        xmin = tier_list$`Tissue translocation`["Q5"],
+        xmax = tier_list$`Tissue translocation`["Q95"],
+        ymin = -Inf,
+        ymax = Inf,
+        fill = ggplot2::alpha("purple", 0.1),
+        color = NA
+      )
+  }
+
+  # Voeg de datalaag en rest toe
+  p <- p +
+    geom_layer +
+    scale_fill_manual(values = river_colors) +
+    scale_color_manual(values = river_colors) +
+    scale_x_log10(
+      breaks = scales::breaks_log(base = 10),
+      labels = scales::label_log(base = 10)
+    ) +
+    ggplot2::labs(
+      subtitle = paste0(tier_select, ", HC5"),
+      x = xlabel,
+      y = "Sample"
+    ) +
+    plot_theme +
+    ggplot2::theme(
+      legend.title = ggplot2::element_blank(),
+      legend.position = "bottom",
+      axis.text.x = ggplot2::element_blank(),
+      strip.text = ggplot2::element_text(size = 20), # grotere facet titel
+      axis.ticks.y = ggplot2::element_blank(),
+      panel.grid.minor.y = ggplot2::element_blank(),
+      plot.margin = ggplot2::margin(t = 0.5, r = 0.5, b = 0.5, l = 0.5, unit = "cm")
+    ) +
+    ggplot2::coord_flip() +
+    guides(
+      color = guide_legend(override.aes = list(size = 4)),
+      fill = guide_legend(override.aes = list(size = 4))
+    )
+
+  # Voeg vlines toe
+  if ("Volume ERM" %in% tier_select) {
+    p <- p +
+      ggplot2::geom_vline(xintercept = tier_list$`Food dilution`["Median"], color = "blue", size = 0.6) +
+      ggplot2::geom_vline(xintercept = tier_list$`Food dilution`["Q5"], linetype = "dashed", color = ggplot2::alpha("blue", 0.4)) +
+      ggplot2::geom_vline(xintercept = tier_list$`Food dilution`["Q95"], linetype = "dashed", color = ggplot2::alpha("blue", 0.4))
+  }
+  if ("Surface area ERM" %in% tier_select) {
+    p <- p +
+      ggplot2::geom_vline(xintercept = tier_list$`Tissue translocation`["Median"], color = "purple", size = 0.6) +
+      ggplot2::geom_vline(xintercept = tier_list$`Tissue translocation`["Q5"], linetype = "dashed", color = ggplot2::alpha("purple", 0.4)) +
+      ggplot2::geom_vline(xintercept = tier_list$`Tissue translocation`["Q95"], linetype = "dashed", color = ggplot2::alpha("purple", 0.4))
+  }
+
+  if (option != "reported") {
+      median_df <- df |>
+        group_by(Sample_ID, Data_source) |>
+        summarise(concentration = median(concentration))
+    p <- p + ggplot2::geom_point(
+      data = dplyr::filter(median_df, Data_source == "Mughini-Gras et al. (2021)"),
+      mapping = ggplot2::aes(
+        x = concentration,
+        y = forcats::fct_reorder(Sample_ID, concentration, .fun = median)
+      ),
+      color = "black",
+      shape = 8, # asterisk
+      size = 2,
+      stroke = 0.4,
+      position = ggplot2::position_nudge(x = 0.6),
+      show.legend = FALSE
+    )
+  }
+    
+  if (option == "reported") {
+    p <- p + ggplot2::geom_point(
+      data = dplyr::filter(data_plot, Data_source == "Mughini-Gras et al. (2021)"),
+      mapping = ggplot2::aes(
+        x = concentration,
+        y = forcats::fct_reorder(Sample_ID, concentration, .fun = median)
+      ),
+      color = "black",
+      shape = 8, # asterisk
+      size = 2,
+      stroke = 0.4,
+      position = ggplot2::position_nudge(x = 0.2),
+      show.legend = FALSE
+    )
+  }
+
+  return(p)
+}
+```
+
+## Function for violin plot of concentrations
+
+``` r
+plot_facet_option_simple <- function(
+  df,
+  option,
+  option_labels,
+  plot_theme
+) {
+  # Data selecteren
+  if (option %in% c("concentrationOption2", "concentrationOption3")) {
+    data_plot <- dplyr::filter(df, OptionType == option)
+    geom_layer <- ggplot2::geom_violin(
+      mapping = ggplot2::aes(
+        x = concentration,
+        y = forcats::fct_reorder(Sample_ID, concentration, .fun = median),
+        fill = River
+      )
+    )
+  } else if (option == "reported") {
+    data_plot <- dplyr::filter(df, OptionType == option)
+    geom_layer <- ggplot2::geom_point(
+      mapping = ggplot2::aes(
+        x = concentration,
+        y = forcats::fct_reorder(Sample_ID, concentration, .fun = median),
+        color = River
+      ),
+      shape = 16,
+      size = 3
+    )
+  } else {
+    stop("Onbekende optie")
+  }
+
+  if(option == "reported"){
+    scale_layer <- ggplot2::scale_color_manual(values = river_colors)
+    xlabel = expression("Reported concentration (#/m"^3*")")
+  } else {
+    scale_layer <- ggplot2::scale_fill_manual(values = river_colors)
+    xlabel = expression("Rescaled concentration (#/m"^3*")")
+  }
+
+  facet_title <- option_labels[[option]]
+
+  p <- ggplot2::ggplot(data = data_plot) +
+    geom_layer +
+    scale_layer +
+    scale_x_log10(
+      breaks = scales::breaks_log(base = 10),
+      labels = scales::label_log(base = 10)
+    ) +
+    ggplot2::labs(
+      #title = facet_title,
+      x = xlabel,
+      y = "Sample"
+    ) +
+    plot_theme +
+    ggplot2::theme(
+      legend.title = ggplot2::element_blank(),
+      legend.position = "bottom",
+      axis.text.x = ggplot2::element_blank(),
+      strip.text = ggplot2::element_text(size = 13),
+      axis.ticks.y = ggplot2::element_blank(),
+      panel.grid.minor.y = ggplot2::element_blank(),
+      plot.margin = ggplot2::margin(t = 0.5, r = 0.5, b = 0.5, l = 0.5, unit = "cm")
+    ) +
+    ggplot2::coord_flip()+
+    guides(
+      color = guide_legend(override.aes = list(size = 4)),
+      fill = guide_legend(override.aes = list(size = 4))
+    )
+  
+    if (option != "reported") {
+      median_df <- df |>
+        group_by(Sample_ID, Data_source) |>
+        summarise(concentration = median(concentration))
+    p <- p + ggplot2::geom_point(
+      data = dplyr::filter(median_df, Data_source == "Mughini-Gras et al. (2021)"),
+      mapping = ggplot2::aes(
+        x = concentration,
+        y = forcats::fct_reorder(Sample_ID, concentration, .fun = median)
+      ),
+      color = "black",
+      shape = 8, # asterisk
+      size = 2,
+      stroke = 0.4,
+      position = ggplot2::position_nudge(x = 0.6),
+      show.legend = FALSE
+    )
+  }
+    
+  if (option == "reported") {
+    p <- p + ggplot2::geom_point(
+      data = dplyr::filter(data_plot, Data_source == "Mughini-Gras et al. (2021)"),
+      mapping = ggplot2::aes(
+        x = concentration,
+        y = forcats::fct_reorder(Sample_ID, concentration, .fun = median)
+      ),
+      color = "black",
+      shape = 8, # asterisk
+      size = 2,
+      stroke = 0.4,
+      position = ggplot2::position_nudge(x = 0.2),
+      show.legend = FALSE
+    )
+  }
+  
+  return(p)
+}
+```
+
+# Figures
+
+## Paragraph 3.2.1
+
+``` r
+plot_data_without_effluent <- ConcAlphaAlignedUncertain_L |>
+  filter(River != "WWTP Werverschoof effluent canal")
+
+plot_data_effluent_only <- ConcAlphaAlignedUncertain_L |>
+  filter(River == "WWTP Werverschoof effluent canal")
+```
+
+### Reported concentrations without effluent
+
+``` r
+option = "reported"
+p = plot_facet_option_simple(
+  df = plot_data_without_effluent,
+  option = option,
+  option_labels = option_labels,
+  plot_theme = theme_minimal())
+
+print(p)
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+
+``` r
+#ggsave(paste0(project_dir, concentrations_dir, "/",Sys.Date(),"_Rescaled concentration violin ", option, " Background", ".png"), plot = p, width = 12, height = 9, dpi = 300)
+```
+
+### Reported concentrations effluent canal only
+
+``` r
+p = plot_facet_option_simple(  
+  df = plot_data_effluent_only,
+  option = "reported",
+  option_labels = option_labels,
+  plot_theme = theme_minimal())
+
+print(p)
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
+
+``` r
+#ggsave(paste0(project_dir, concentrations_dir, "/",Sys.Date(),"_Rescaled concentration violin ", option, " effluent canal", ".png"), plot = p, width = 12, height = 9, dpi = 300)
+```
+
+## Paragraph 3.2.2
+
+### Power law slope
+
+``` r
+ConcAlphaUncertain_plot <- 
+  fAlignUncertain(
+    ConcAlphaCombined = ConcPSD, 
+    nRuns = 1000,
+    SizeParameter = "longest") 
+
+ConcAlphaUncertain_plot$River <- gsub(
+  "WWTP Werverschoof effluent canal",
+  "WWTP Werverschoof\neffluent canal",
+  ConcAlphaUncertain_plot$River
+) 
+
+ConcAlphaUncertain_plot$Analysis_method <- gsub(
+  "ATR-FTIR and Micro-FTIR",
+  "FTIR",
+  ConcAlphaUncertain_plot$Analysis_method
+) 
+
+triangle_alpha_plot_river <- ggplot(ConcAlphaUncertain_plot, 
+                             aes(x = triangle_alpha, 
+                                 y = forcats::fct_reorder(River, triangle_alpha, .fun = median), 
+                                 fill = River)) +
+  geom_violin() +
+  facet_wrap(~ Analysis_method) + 
+  theme_minimal() +
+  scale_fill_manual(values = river_colors) +
+  theme(legend.position = "none",
+            strip.text = element_text(size = 22)) +
+  labs(
+    x="Power law slope",
+    y=""
+  ) 
+
+asterisk_data <- ConcAlphaUncertain_plot %>%
+  filter(River %in% c("Lek canal", "Rhine")) %>%
+  group_by(River, Analysis_method) %>%
+  summarise(triangle_alpha = min(triangle_alpha), .groups = 'drop')
+
+triangle_alpha_plot_river <- triangle_alpha_plot_river +
+  ggplot2::geom_point(
+    data = asterisk_data,
+    mapping = ggplot2::aes(
+      x = triangle_alpha,
+      y = forcats::fct_reorder(River, triangle_alpha, .fun = median)
+    ),
+    color = "black",
+    shape = 8, # asterisk
+    size = 3,
+    stroke = 0.6,
+    position = ggplot2::position_nudge(x = -0.2),
+    show.legend = FALSE
+  )
+
+triangle_alpha_plot_river
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
+
+``` r
+#ggsave(paste0(project_dir, alphas_dir, "/", Sys.Date(), "_Triange_alpha_river_analysis_method", ".png"), plot = triangle_alpha_plot_river, width = 12, height = 6, dpi = 300)
+```
+
+### Correction factor
+
+``` r
+CF_plotdata <- ConcAlphaAlignedUncertain |>
+  mutate(
+    Analysis_method = case_when(
+      Analysis_method == "ATR-FTIR and Micro-FTIR" ~ "FTIR",
+      TRUE ~ Analysis_method
+    ),
+    CF_factor = paste0(River, ", ", Analysis_method),
+    CF_factor = fct_reorder(CF_factor, CF_option3, .fun = median, .desc = FALSE)
+  )
+
+cf_plot <- ggplot(CF_plotdata, aes(x = CF_option3, y = CF_factor, fill = River)) +
+  geom_violin() +
+  scale_fill_manual(values = river_colors) +
+  scale_x_log10(labels = scales::comma) +
+  theme_minimal() +
+  theme(
+    legend.position = "none"
+  ) +
+  labs(
+    x = "Correction factor",
+    y = ""
+  )
+
+asterisk_data <- CF_plotdata %>%
+  filter(River %in% c("Lek canal", "Rhine")) %>%
+  group_by(CF_factor, River) %>%  
+  summarise(CF_option3 = min(CF_option3), .groups = 'drop')
+
+cf_plot <- cf_plot +
+  ggplot2::geom_point(
+    data = asterisk_data,
+    mapping = ggplot2::aes(
+      x = CF_option3,
+      y = forcats::fct_reorder(CF_factor, CF_option3, .fun = median)
+    ),
+    color = "black",
+    shape = 8, # asterisk
+    size = 3,
+    stroke = 0.6,
+    position = ggplot2::position_nudge(x = -0.2),
+    show.legend = FALSE
+  )
+
+cf_plot
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
+
+``` r
+#ggsave(paste0(project_dir, alphas_dir, "/", Sys.Date(), "_Correction_factors", ".png"),width = 14, height = 10, dpi = 300)
+```
+
+## Paragraph 3.2.3
+
+### Spread in average concentrations
+
+``` r
+all_rescaled_concentrations <- rbind(plot_data_effluent_only, plot_data_without_effluent) |> 
+  filter(OptionType == "concentrationOption3")
+
+spread_river <- ggplot(all_rescaled_concentrations, 
+                             aes(x = concentration, 
+                                 y = forcats::fct_reorder(River, concentration, .fun = median), 
+                                 fill = River)) +
+  geom_violin() +
+  facet_wrap(~ Analysis_method) + 
+  scale_fill_manual(values = river_colors) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(
+    x = expression("Rescaled particle number concentration (#/m"^3*")"),
+    y = ""
+  ) +
+  scale_x_log10(
+    breaks = scales::breaks_log(base = 10),
+    labels = scales::label_log(base = 10)
+  )
+
+asterisk_data <- all_rescaled_concentrations %>%
+  filter(River %in% c("Lek canal", "Rhine")) %>%
+  group_by(River, Analysis_method) %>%  
+  summarise(concentration = min(concentration), .groups = 'drop')
+
+spread_river <- spread_river +
+  ggplot2::geom_point(
+    data = asterisk_data,
+    mapping = ggplot2::aes(
+      x = concentration,
+      y = forcats::fct_reorder(River, concentration, .fun = median)
+    ),
+    color = "black",
+    shape = 8, # asterisk
+    size = 3,
+    stroke = 0.6,
+    position = ggplot2::position_nudge(x = -1),
+    show.legend = FALSE
+  )
+
+spread_river
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
+
+``` r
+#ggsave(paste0(project_dir, concentrations_dir, "/",Sys.Date(),"_Spread comparison concentration violin ", ".png"), plot = spread_river, width = 16, height = 9, dpi = 300)
+```
+
+## Paragraph 3.5
+
+### Without effluent
+
+``` r
+options <- c("concentrationOption3")
+
+for(option in options){
+  p <- plot_facet_option(
+  df = plot_data_without_effluent,
+  option = option,
+  tier_list = tier3_list,
+  tier_select = "Volume ERM",
+  option_labels = option_labels,
+  plot_theme = theme_minimal()
+)
+  print(p)
+  
+#ggsave(paste0(project_dir, concentrations_dir, "/",Sys.Date(),"_RescaledConcentrationHC5Tier3_", option, "_Food Dilution background.png"), plot = p, width = 12, height = 9, dpi = 300)
+}
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/unnamed-chunk-16-1.png)<!-- -->
+
+``` r
+for(option in options){
+  p <- plot_facet_option(
+  df = plot_data_without_effluent,
+  option = option,
+  tier_list = tier3_list,
+  tier_select = "Surface area ERM",
+  option_labels = option_labels,
+  plot_theme = theme_minimal()
+)
+  print(p)
+  
+#ggsave(paste0(project_dir,concentrations_dir, "/", Sys.Date(), "_RescaledConcentrationHC5Tier3_", option, " Tissue Translocation background", ".png"), plot = p, width = 12, height = 9, dpi = 300)
+}
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/unnamed-chunk-16-2.png)<!-- -->
+
+### Effluent only
+
+``` r
+options <- c("concentrationOption3")
+
+option = "concentrationOption3"
+for(option in options){
+  p <- plot_facet_option(
+  df = plot_data_effluent_only,
+  option = option,
+  tier_list = tier3_list,
+  tier_select = "Volume ERM",
+  option_labels = option_labels,
+  plot_theme = theme_minimal()
+)
+  print(p)
+  
+#ggsave(paste0(project_dir, concentrations_dir, "/",Sys.Date(),"_RescaledConcentrationHC5Tier3_", option, " Food dilution effluent canal", ".png"), plot = p, width = 12, height = 9, dpi = 300)
+}
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/unnamed-chunk-17-1.png)<!-- -->
+
+``` r
+for(option in options){
+  p <- plot_facet_option(
+  df = plot_data_effluent_only,
+  option = option,
+  tier_list = tier3_list,
+  tier_select = "Surface area ERM",
+  option_labels = option_labels,
+  plot_theme = theme_minimal()
+)
+  print(p)
+  
+#ggsave(paste0(project_dir, concentrations_dir, "/",Sys.Date(),"_RescaledConcentrationHC5Tier3_", option, " Tissue translocation effluent canal", ".png"), plot = p, width = 12, height = 9, dpi = 300)
+}
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/unnamed-chunk-17-2.png)<!-- -->
+
+## Paragraph 3.2.4
+
+### Polymer fraction comparison
+
+#### Load modelled concentrations
+
+``` r
+Concentrations_2019 <- read_rds(paste0(project_dir, output_dir, "Data/Particle_concentrations_SimpleBox.rds"))
+
+# sum air and cloudwater
+Concentrations_2019 <- Concentrations_2019 |>
+  filter(Scale == "Regional") |>
+  filter(SubCompart == "river") |>
+  filter(Polymer != "General")
+
+unique(Concentrations_2019$Polymer)
+```
+
+    ##  [1] "ABS"    "Acryl"  "HDPE"   "LDPE"   "NR"     "OTHER"  "PA"     "PC"    
+    ##  [9] "PET"    "PMMA"   "PP"     "PS"     "PUR"    "PVC"    "RUBBER" "SBR"   
+    ## [17] "EPS"
+
+``` r
+concentrations_SB_polymer_mapped <- Concentrations_2019 |>
+  mutate(Polymer = case_when(
+    Polymer == "OTHER" ~ "Others",
+    Polymer %in% c("LDPE", "HDPE") ~ "PE",
+    Polymer == "RUBBER" ~ "Other synthetic rubbers",
+    TRUE ~ Polymer
+  )) |>
+  group_by(RUN, Unit, Concentration, Polymer, Year, Scale, SubCompart) |>
+  summarise(Concentration = sum(Concentration))
+
+Mean_SB_concentrations <- concentrations_SB_polymer_mapped |>
+    group_by(Unit, Polymer, Year, Scale, SubCompart) |>
+    summarise(concentration = mean(Concentration)) |>
+    ungroup()
+
+SB_total_concentration <- sum(Mean_SB_concentrations$concentration)
+
+SB_polymer_fractions <- Mean_SB_concentrations %>%
+  mutate(mean_fraction = concentration/SB_total_concentration) |>
+  mutate(mean_percentage = mean_fraction*100) |>
+  mutate(Data_source = "SimpleBox*") |>
+  select(Data_source, Polymer, mean_fraction, mean_percentage)
+```
+
+#### Load particle measurement concentrations
+
+``` r
+ReportedPolymerData <- readRDS(paste0(project_dir, output_dir, "Data/", DataVersionConc, "Particle_concentrations_per_polymer.rds")) 
+
+particle_concentrations_polymer <- ReportedPolymerData |>
+  group_by(Data_source, Polymer) |>
+  summarise(concentration = mean(concentration)) |>
+  ungroup() |>
+  mutate(Data_source = case_when(
+    Data_source == "Mintenig, Hunnestad & Koelmans (2025)" ~ "Mintenig et al. (2025)",
+    TRUE ~ Data_source
+  ))
+
+particle_concentrations_total_calculated <- particle_concentrations_polymer |>
+  group_by(Data_source) |>
+  summarise(total_concentration = sum(concentration)) |>
+  ungroup() 
+
+particle_concentrations_polymer <- particle_concentrations_polymer |>
+  left_join(particle_concentrations_total_calculated) |>
+  group_by(Data_source, Polymer) |>
+  summarise(
+    mean_fraction = mean(concentration / total_concentration),
+    .groups = "drop"
+  ) |>
+  mutate(mean_percentage = mean_fraction*100) 
+
+plot_data <- rbind(particle_concentrations_polymer, SB_polymer_fractions)
+
+unique(particle_concentrations_polymer$Polymer)
+```
+
+    ##  [1] "ABS"                     "Acryl"                  
+    ##  [3] "Other synthetic rubbers" "Others"                 
+    ##  [5] "PA"                      "PC"                     
+    ##  [7] "PE"                      "PET"                    
+    ##  [9] "PMMA"                    "PP"                     
+    ## [11] "PS"                      "PUR"                    
+    ## [13] "PVC"                     "EPDM"                   
+    ## [15] "NR"                      "SBR"
+
+``` r
+controle <- plot_data %>%
+  group_by(Data_source) %>%
+  summarise(som_mean_fraction = sum(mean_fraction))
+
+print(controle)
+```
+
+    ## # A tibble: 6 × 2
+    ##   Data_source                som_mean_fraction
+    ##   <chr>                                  <dbl>
+    ## 1 Bäuerlein et al. (2022)                    1
+    ## 2 Bäuerlein et al. (2023)                    1
+    ## 3 Mintenig et al. (2020)                     1
+    ## 4 Mintenig et al. (2025)                     1
+    ## 5 Mughini-Gras et al. (2021)                 1
+    ## 6 SimpleBox*                                 1
+
+``` r
+PolymerMeasurements <-
+  ReportedPolymerData |> ungroup() |> 
+  group_by(River, Polymer, Analysis_method) |> 
+  summarise(PolConcAvg = mean(concentration)) |>
+  left_join(
+    ReportedPolymerData |> ungroup() |> 
+      group_by(River, Polymer, Analysis_method) |> 
+      summarise(PolConcAvg = mean(concentration)) |>
+      ungroup() |> 
+      group_by(River,Analysis_method) |>
+      summarise(TotConcAvg = sum(PolConcAvg)) |>
+      ungroup() 
+  ) |> mutate(PolFrac = PolConcAvg/TotConcAvg)
+
+PolymerIndividualMeasurements <- ReportedPolymerData |> 
+  ungroup() |> 
+  group_by(River, Polymer, Analysis_method,Sample_ID) |> 
+  summarise(PolConcAvg = mean(concentration)) |>
+  left_join(
+    ReportedPolymerData |> 
+      ungroup() |> 
+      group_by(River, Polymer, Analysis_method,Sample_ID) |> 
+      summarise(PolConcAvg = mean(concentration)) |>
+      ungroup() |> 
+      group_by(River,Analysis_method) |>
+      summarise(TotConcAvg = sum(PolConcAvg)) |>
+      ungroup()) |> 
+  mutate(PolFrac = PolConcAvg/TotConcAvg)
+```
+
+#### Plot
+
+``` r
+n_polymeren <- length(unique(plot_data$Polymer))
+
+p1 <- ggplot(plot_data, aes(x = Data_source, y = mean_percentage, fill = Polymer)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_viridis_d(option = "turbo", end = 0.9) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    x = "",
+    y = "",
+    fill = ""
+  ) +
+  theme_minimal() + 
+  coord_flip() +
+  theme_minimal()
+
+print(p1)
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/unnamed-chunk-19-1.png)<!-- -->
+
+``` r
+#ggsave(paste0(project_dir,"Figures/Measurements/Polymer_distributions_compared.png"), plot = p1, width = 12, height = 9, dpi = 1200)
+```
+
+#### Save table with average fractions
+
+``` r
+polymer_fraction_table <- plot_data |>
+  select(-mean_percentage) |>
+  pivot_wider(
+    id_cols = Polymer,
+    names_from = Data_source,
+    values_from = mean_fraction)
+
+# openxlsx::write.xlsx(polymer_fraction_table, file = paste0(project_dir, "Tables/Polymer_share_per_source.xlsx"))
+```
+
+## Appendix 4
+
+### Reported concentrations compared to HC5
+
+#### Without effluent
+
+``` r
+options <- c("reported")
+
+for(option in options){
+  p <- plot_facet_option(
+  df = plot_data_without_effluent,
+  option = option,
+  tier_list = tier3_list,
+  tier_select = "Volume ERM",
+  option_labels = option_labels,
+  plot_theme = theme_minimal()
+)
+  print(p)
+  
+#ggsave(paste0(project_dir, concentrations_dir, "/",Sys.Date(),"_RescaledConcentrationHC5Tier3_", option, "_Food Dilution background.png"), plot = p, width = 12, height = 9, dpi = 300)
+}
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/unnamed-chunk-21-1.png)<!-- -->
+
+``` r
+for(option in options){
+  p <- plot_facet_option(
+  df = plot_data_without_effluent,
+  option = option,
+  tier_list = tier3_list,
+  tier_select = "Surface area ERM",
+  option_labels = option_labels,
+  plot_theme = theme_minimal()
+)
+  print(p)
+  
+#ggsave(paste0(project_dir,concentrations_dir, "/", Sys.Date(), "_RescaledConcentrationHC5Tier3_", option, " Tissue Translocation background", ".png"), plot = p, width = 12, height = 9, dpi = 300)
+}
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/unnamed-chunk-21-2.png)<!-- -->
+
+#### Effluent only
+
+``` r
+options <- c("reported")
+
+option = "concentrationOption3"
+for(option in options){
+  p <- plot_facet_option(
+  df = plot_data_effluent_only,
+  option = option,
+  tier_list = tier3_list,
+  tier_select = "Volume ERM",
+  option_labels = option_labels,
+  plot_theme = theme_minimal()
+)
+  print(p)
+  
+#ggsave(paste0(project_dir, concentrations_dir, "/",Sys.Date(),"_RescaledConcentrationHC5Tier3_", option, " Food dilution effluent canal", ".png"), plot = p, width = 12, height = 9, dpi = 300)
+}
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/unnamed-chunk-22-1.png)<!-- -->
+
+``` r
+for(option in options){
+  p <- plot_facet_option(
+  df = plot_data_effluent_only,
+  option = option,
+  tier_list = tier3_list,
+  tier_select = "Surface area ERM",
+  option_labels = option_labels,
+  plot_theme = theme_minimal()
+)
+  print(p)
+  
+#ggsave(paste0(project_dir, concentrations_dir, "/",Sys.Date(),"_RescaledConcentrationHC5Tier3_", option, " Tissue translocation effluent canal", ".png"), plot = p, width = 12, height = 9, dpi = 300)
+}
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/unnamed-chunk-22-2.png)<!-- -->
+
+### Polypropylene figures
+
+#### Read in data
+
+``` r
+AlphasPPLDIR <- read_csv(paste0(project_dir, output_dir,"Data/powerlawFitLDIR_pp", DataVersionPowerlawLDIR, ".csv")) |>
+  select(-`...1`)
+AlphasPPFTIR <-  read_csv(paste0(project_dir, output_dir,"Data/powerlawFitFTIR_pp", DataVersionPowerlawFTIR, ".csv")) |>
+  select(-`...1`)
+
+concentrations_PP <- read_rds(paste0(project_dir, output_dir,"Data/",DataVersionConc,"Particle_concentrations_per_polymer.rds")) |>
+  filter(Polymer == "PP")
+
+# Exclude samples from Mintenig (2020) which were indicated only for MP > 300 um.
+concentrations_PP <- concentrations_PP |>
+  filter(!endsWith(Location_name,"*"))
+
+alphas <- AlphasPPFTIR|>
+  mutate(Analysis_method = "ATR-FTIR and Micro-FTIR")|>
+  bind_rows(AlphasPPLDIR|>
+              mutate(Analysis_method = "LDIR"))
+```
+
+#### Align concentrations
+
+``` r
+ConcPSD_PP <- concentrations_PP |>
+  filter(!is.na(River))|>
+  left_join(alphas |> # leaves out the ones where id == All
+              select(id,
+                     param,
+                     alpha,
+                     alpha_lower,
+                     alpha_upper,
+                     Analysis_method),
+            by = c("River" = "id",
+                   "Analysis_method" = "Analysis_method"),
+            relationship = "many-to-many")|>
+  filter(!Analysis_method=="Light microscopy")
+
+ConcAlphaUncertain_PP <- 
+  fAlignUncertain(
+    ConcAlphaCombined = ConcPSD_PP, 
+    nRuns = 1000,
+    SizeParameter = "longest")
+
+ConcAlphaAlignedUncertain_PP <- ConcAlphaUncertain_PP |> 
+  mutate(CF_option2 = 
+           F.Correctionfactor(Upper_sampling_size_limit_um,
+                              Lower_sampling_size_limit_um,
+                              5000,
+                              1,
+                              triangle_alpha))|>
+  mutate(concentrationOption2 = CF_option2*
+           concentration) |> 
+  mutate(CF_option3 = 
+           F.Correctionfactor(triangle_sampling_upper,
+                              triangle_sampling_lower,
+                              5000,
+                              1,
+                              triangle_alpha))|>
+  mutate(concentrationOption3 = CF_option3*
+           concentration)
+
+ConcAlphaAlignedUncertain_PP_L <-
+  ConcAlphaAlignedUncertain_PP |> 
+  rename(reported = concentration) |> 
+  pivot_longer(
+    cols = c(reported,concentrationOption2,concentrationOption3),
+    names_to = "OptionType",
+    values_to = "concentration"
+  )
+
+rm(ConcAlphaUncertain_PP)
+```
+
+#### Plot
+
+``` r
+plot_facet_option_simple <- function(
+  df,
+  option,
+  option_labels,
+  plot_theme
+) {
+  # Data selecteren
+  if (option %in% c("concentrationOption2", "concentrationOption3")) {
+    data_plot <- dplyr::filter(df, OptionType == option)
+    geom_layer <- ggplot2::geom_violin(
+      mapping = ggplot2::aes(
+        x = concentration,
+        y = forcats::fct_reorder(Sample_ID, concentration, .fun = median),
+        fill = River
+      )
+    )
+  } else if (option == "reported") {
+    data_plot <- dplyr::filter(df, OptionType == option)
+    geom_layer <- ggplot2::geom_point(
+      mapping = ggplot2::aes(
+        x = concentration,
+        y = forcats::fct_reorder(Sample_ID, concentration, .fun = median),
+        color = River
+      ),
+      shape = 16,
+      size = 3
+    )
+  } else {
+    stop("Onbekende optie")
+  }
+
+  if(option == "reported"){
+    scale_layer <- ggplot2::scale_color_manual(values = river_colors)
+    xlabel = expression("Reported concentration (#/m"^3*")")
+  } else {
+    scale_layer <- ggplot2::scale_fill_manual(values = river_colors)
+    xlabel = expression("Rescaled concentration (#/m"^3*")")
+  }
+
+  facet_title <- option_labels[[option]]
+
+  p <- ggplot2::ggplot(data = data_plot) +
+    geom_layer +
+    scale_layer +
+    scale_x_log10(
+      breaks = scales::breaks_log(base = 10),
+      labels = scales::label_log(base = 10)
+    ) +
+    ggplot2::labs(
+      #title = facet_title,
+      x = xlabel,
+      y = "Sample"
+    ) +
+    plot_theme +
+    ggplot2::theme(
+      legend.title = ggplot2::element_blank(),
+      legend.position = "bottom",
+      axis.text.x = ggplot2::element_blank(),
+      strip.text = ggplot2::element_text(size = 13),
+      axis.ticks.y = ggplot2::element_blank(),
+      panel.grid.minor.y = ggplot2::element_blank(),
+      plot.margin = ggplot2::margin(t = 0.5, r = 0.5, b = 0.5, l = 0.5, unit = "cm")
+    ) +
+    ggplot2::coord_flip()+
+    guides(
+      color = guide_legend(override.aes = list(size = 4)),
+      fill = guide_legend(override.aes = list(size = 4))
+    )
+  
+    if (option != "reported") {
+      median_df <- df |>
+        group_by(Sample_ID, Data_source) |>
+        summarise(concentration = median(concentration))
+    p <- p + ggplot2::geom_point(
+      data = dplyr::filter(median_df, Data_source == "Mughini-Gras et al. (2021)"),
+      mapping = ggplot2::aes(
+        x = concentration,
+        y = forcats::fct_reorder(Sample_ID, concentration, .fun = median)
+      ),
+      color = "black",
+      shape = 3,
+      size = 3,
+      stroke = 0.8,
+      position = ggplot2::position_nudge(x = 0.3),
+      show.legend = FALSE
+    )
+  }
+    
+  if (option == "reported") {
+    p <- p + ggplot2::geom_point(
+      data = dplyr::filter(data_plot, Data_source == "Mughini-Gras et al. (2021)"),
+      mapping = ggplot2::aes(
+        x = concentration,
+        y = forcats::fct_reorder(Sample_ID, concentration, .fun = median)
+      ),
+      color = "black",
+      shape = 3,
+      size = 3,
+      stroke = 0.8,
+      position = ggplot2::position_nudge(x = 0.3),
+      show.legend = FALSE
+    )
+  }
+  
+  return(p)
+}
+```
+
+``` r
+plot_data_meuse_rhine <- ConcAlphaAlignedUncertain_PP_L |>
+  filter(River %in% c("Meuse", "Rhine"))
+
+plot_data_other <- ConcAlphaAlignedUncertain_PP_L |>
+  filter(!River %in% c("Meuse", "Rhine")) |>
+  mutate(River = case_when(
+    River == "WWTP Werverschoof effluent canal" ~ "WWTP canal*",
+    TRUE ~ River
+  ))
+
+option = "concentrationOption3"
+
+# Meuse and Rhine
+p = plot_facet_option_simple(
+  df = plot_data_meuse_rhine,
+  option = option,
+  option_labels = option_labels,
+  plot_theme = theme_minimal())
+
+print(p)
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/Plot%20PP%20concentrations-1.png)<!-- -->
+
+``` r
+#ggsave(paste0(project_dir, concentrations_dir, "/", Sys.Date(), "_Rescaled concentration violin PP Meuse Rhine ", option, " Background", ".png"), plot = p, width = 12, height = 9, dpi = 300)
+
+# Other water bodies
+p = plot_facet_option_simple(
+  df = plot_data_other,
+  option = option,
+  option_labels = option_labels,
+  plot_theme = theme_minimal())
+
+print(p)
+```
+
+![](03_NumberConcentrationRescaling_files/figure-gfm/Plot%20PP%20concentrations-2.png)<!-- -->
+
+``` r
+#ggsave(paste0(project_dir, concentrations_dir, "/", Sys.Date(), "_Rescaled concentration violin PP Other ", option, " Background", Sys.Date(), ".png"), plot = p, width = 12, height = 9, dpi = 300)
+```
+
+#### Table with summary statistics
+
+``` r
+PP_averages_table <- ConcAlphaAlignedUncertain_PP_L |>
+  filter(OptionType == "concentrationOption3") |>
+  group_by(Sample_ID, River) |>
+  summarise(concentration = mean(concentration)) |>
+  ungroup() |>
+  group_by(River) |>
+summarise(
+  min = format(min(concentration), scientific = TRUE, digits = 2),
+  max = format(max(concentration), scientific = TRUE, digits = 2),
+  mean = format(mean(concentration), scientific = TRUE, digits = 2)
+) |>
+  ungroup() |>
+  mutate(min = as.character(min),
+         mean = as.character(mean), 
+         max = as.character(max),
+         `Concentration (#/m3)` = paste0(mean, " (", min, "-", max, ")")) |>
+  select(River, `Concentration (#/m3)`) |>
+  rename(`Measured (#/m3)` = `Concentration (#/m3)`)
+
+#openxlsx::write.xlsx(PP_averages_table, file = paste0(output_dir, "Tables/Number_concentrations_PP.xlsx"))
+```

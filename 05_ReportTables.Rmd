@@ -1,0 +1,275 @@
+---
+title: "05_ReportTables"
+output: github_document
+bibliography: references.bib
+link-citations: true
+editor_options: 
+  chunk_output_type: console
+  markdown: 
+    wrap: 72
+---
+
+The code below was used to make tables for paragraph 3.1 and Appendix 1.
+These tables are all related to the reported measurement data, metadata
+and QA/QC scores.
+
+# Preparation
+
+```{R load packages, warning=F, message=F}
+library(tidyverse)
+library(readxl)
+source("paths.R")
+DataVersion <- "2026-07-07"
+```
+
+## Load data
+
+First we read in the prepared data we need for making plots.
+
+```{R, warning=F, message=F}
+particle_concentrations_total <- readRDS(paste0(project_dir, output_dir, "Data/", DataVersion, "Particle_concentrations_total.rds"))|> 
+  filter(Data_source != "Leslie et al. (2017)") |>
+    filter(!endsWith(Location_name,"*"))
+
+particle_concentrations_polymer <- readRDS(paste0(project_dir, output_dir, "Data/", DataVersion, "Particle_concentrations_per_polymer.rds"))|> 
+  filter(Data_source != "Leslie et al. (2017)") |>
+  filter(!endsWith(Location_name,"*"))
+
+raw_ftir_data <- readRDS(paste0(project_dir, output_dir, 
+                                "Data/", DataVersion, "Raw_FTIR_data.rds"))
+```
+
+Below the mass data is read in. This chunk is not run because the input
+data is not publicly available.
+
+```{R Read in mass data, warning=F, message=F, eval=F}
+# Read in the mass metadata
+Mass_MetaData <- read_excel(paste0(Input_dir, "/RWS_2025/readme.xlsx")) |>
+  left_join(read_excel(paste0(Input_dir, "/RWS_2025/readme.xlsx"), sheet = "Locations")) |>
+  left_join(read_excel(paste0(Input_dir, "/RWS_2025/readme.xlsx"), sheet = "Sampling methods"))
+
+Mass_concentrations_PP <- read_rds(paste0(project_dir, output_dir, "Data/2026-07-01-PP_SPM_Concentrations.rds"))
+```
+
+# Paragraph 2.3
+
+## Suspended Particulate Matter
+
+```{r SPM, warning=F, message=F, eval=F}
+
+spm_data <- Mass_concentrations_PP |>
+  select(Location_name, Sampling_date_from, Sampling_date_to, SPM_mg_L_median, SPM_mg_L_min, SPM_mg_L_max)
+
+# openxlsx::write.xlsx(spm_data, file = paste0(project_dir,output_dir, "Tables/All_SPM.xlsx"))
+
+spm_data$Sampling_date_from <- as.Date(spm_data$Sampling_date_from)
+spm_data$Sampling_date_to <- as.Date(spm_data$Sampling_date_to)
+
+ggplot(spm_data, aes(x = Sampling_date_from, 
+                     y = SPM_mg_L_median, 
+                     color = Location_name)) +
+  geom_point(size = 2) +
+  geom_line(aes(group = Location_name)) +
+  geom_errorbar(aes(ymin = SPM_mg_L_min, ymax = SPM_mg_L_max), width = 0.2) +
+  labs(title = "SPM Concentration in time",
+       x = "Date",
+       y = "SPM (mg/L)",
+       color = "Location") +
+  theme_minimal()
+
+spm_summary <- spm_data %>%
+  group_by(Location_name) %>%
+  summarise(
+    n = n(),
+    median_SPM = signif(median(SPM_mg_L_median, na.rm = TRUE), 2),
+    min_SPM = signif(min(SPM_mg_L_min, na.rm = TRUE), 2),
+    max_SPM = signif(max(SPM_mg_L_max, na.rm = TRUE), 2)
+  )
+
+knitr::kable(spm_summary)
+#openxlsx::write.xlsx(spm_summary, file = paste0(output_dir, "Tables/SPM_summary.xlsx"))
+```
+
+# Paragraph 3.1.2
+
+## Mass overview table
+
+Tis table is based on mass data, so the chunk is not run.
+
+```{R, warning=F, message=F, eval=F}
+Mass_table_summary <- Mass_concentrations_PP |>
+  left_join(Mass_MetaData) |>
+  filter(!is.na(Sampling_method)) |>
+  filter(!is.na(Sampling_date_from)) |>
+  filter(Sampling_date_from >= as.Date("2020-01-01")) |>
+  group_by(Location_name, River) |>
+  summarise(
+    Sampling_methods = paste(na.omit(unique(Sampling_method)), collapse = ", "),
+    Sampling_period = case_when(
+      all(is.na(Sampling_date_from)) ~ NA_character_,
+      all(is.na(Sampling_date_to)) | all(Sampling_date_from == Sampling_date_to, na.rm = TRUE) ~
+        paste0(min(Sampling_date_from, na.rm = TRUE)),
+      TRUE ~ paste0(
+        min(Sampling_date_from, na.rm = TRUE), " t/m ", max(Sampling_date_to, na.rm = TRUE)
+      )
+    ),
+    n_samples = n(),  # aantal rijen per groep
+    .groups = "drop"
+  ) |>
+  mutate(
+    Sampling_period = ifelse(
+      is.na(Sampling_period) | Sampling_period %in% c("NA", "NA t/m NA"),
+      "Not reported",
+      Sampling_period
+    )
+  ) 
+knitr::kable(Mass_table_summary)
+#openxlsx::write.xlsx(Mass_table_summary, file = paste0(output_dir, "Tables/Mass_overview.xlsx"))
+```
+
+# Paragraph 3.1.1
+
+## Particle overview table
+
+```{R, warning=F, message=F}
+particle_overview_table_conc <- particle_concentrations_total |>
+  group_by(River, Analysis_method, Data_source, Sampling_method,Lower_sampling_size_limit_um, Upper_sampling_size_limit_um, Total_QA_QC_score) |>
+  summarise(average_sample_vol_L = mean(Sample_volume_L), 
+            number_of_samples = n_distinct(Sample_ID),
+            min_date = min(sampling_date, na.rm = TRUE),
+            max_date = max(sampling_date, na.rm = TRUE),
+            .groups = "drop") |>
+  select(River, min_date, max_date, number_of_samples, Sampling_method, average_sample_vol_L, Analysis_method, Lower_sampling_size_limit_um, Upper_sampling_size_limit_um, Total_QA_QC_score, Data_source)
+
+particle_overview_table_raw <- raw_ftir_data |>
+  group_by(River, Analysis_method, Data_source, Sampling_method,Lower_sampling_size_limit_um, Upper_sampling_size_limit_um) |>
+  summarise(number_of_particles = n(),
+            .groups = "drop") |>
+  select(River, Sampling_method, Analysis_method, number_of_particles, Lower_sampling_size_limit_um, Upper_sampling_size_limit_um, Data_source)
+
+particle_overview_table <- particle_overview_table_conc |>
+  left_join(particle_overview_table_raw) |>
+    select(River, min_date, max_date, number_of_samples, Sampling_method, average_sample_vol_L, Analysis_method, number_of_particles, Total_QA_QC_score, Lower_sampling_size_limit_um, Upper_sampling_size_limit_um, Data_source)
+
+knitr::kable(particle_overview_table)
+
+#openxlsx::write.xlsx(particle_overview_table, file = paste0(output_dir, "/Tables/Table_3_v2.xlsx"))
+```
+
+# Appendix 4
+
+## Aligned concentration per sample per polymer
+
+```{R, warning=F, message=F}
+# Pivot naar breed formaat
+polymer_shares <- rbind(particle_concentrations_polymer, particle_concentrations_total) |>
+  select(Polymer, Sample_ID, River, Data_source, Analysis_method, concentration, unit) |>
+  pivot_wider(names_from = "Polymer", values_from = "concentration")
+
+id_cols <- c("Sample_ID", "River", "Data_source", "Analysis_method", "unit", "Total")
+
+polymer_shares <- rbind(particle_concentrations_polymer, particle_concentrations_total) %>%
+  select(Polymer, Sample_ID, River, Data_source, Analysis_method, concentration, unit) %>%
+  pivot_wider(names_from = "Polymer", values_from = "concentration") %>%
+  mutate(across(
+    .cols = setdiff(names(.), id_cols),
+    .fns = ~ .x / Total,
+    .names = "frac_{.col}"
+  )) %>%
+  drop_na(Total)
+
+polymer_shares <- polymer_shares %>%
+  select(c(id_cols, starts_with("frac"))) %>%
+  mutate(frac_Total = 1)
+
+# Aligned concentrations
+aligned_concentrations <- readRDS(paste0(project_dir, output_dir, "Data/Rescaled_concentrations_2026-05-13.Rds")) |>
+  filter(OptionType == "concentrationOption3") |>
+  select(Sample_ID, UncId, concentration) |>
+  rename(concentration_total_aligned = concentration)
+
+# Join the aligned concentrations and polymer shares
+aligned_per_polymer <- polymer_shares |>
+  left_join(aligned_concentrations) |>
+  mutate(
+    across(
+      starts_with("frac_"),
+      ~ .x * concentration_total_aligned,
+      .names = "{str_remove(.col, 'frac_')}_#_m3"
+    )
+  ) |>
+  select(-starts_with("frac_")) |>
+  select(-c("UncId", "unit", "Total", "concentration_total_aligned", "River", "Data_source", "Analysis_method")) |>
+  group_by(Sample_ID) |>
+  summarise(
+    across(
+      ends_with("m3"),
+      list(
+        mean = ~mean(.x, na.rm = TRUE),
+        q5   = ~quantile(.x, 0.05, na.rm = TRUE),
+        q95  = ~quantile(.x, 0.95, na.rm = TRUE)
+      ),
+      .names = "{.col}_{.fn}"
+    )
+  )
+
+polymer_cols <- aligned_per_polymer %>%
+  select(ends_with("_mean")) %>%
+  names()
+
+for (col in polymer_cols) {
+  base <- str_remove(col, "_mean$")
+  aligned_per_polymer[[paste0(base, "_summary")]] <-
+    sprintf(
+      "%s (%s - %s)",
+      format(round(aligned_per_polymer[[paste0(base, "_mean")]], 0), scientific = TRUE, trim = TRUE, digits = 1),
+      format(round(aligned_per_polymer[[paste0(base, "_q5")]], 0), scientific = TRUE, trim = TRUE, digits = 1),
+      format(round(aligned_per_polymer[[paste0(base, "_q95")]], 0), scientific = TRUE, trim = TRUE, digits = 1)
+    )
+}
+
+summary_cols <- aligned_per_polymer %>%
+  select(ends_with("_summary")) %>%
+  names()
+
+aligned_per_polymer <- aligned_per_polymer %>%
+  mutate(
+    across(
+      all_of(summary_cols),
+      ~ ifelse(. %in% c("NaN (NA - NA)"), "ND", .)
+    )
+  )
+
+# Samples without polymer distribution available
+special_ids <- c("Mintenig_2020_42", "Mintenig_2020_43", "Mintenig_2020_44",
+                 "Mintenig_2020_45", "Mintenig_2020_46", "Mintenig_2020_47",
+                 "Mintenig_2020_48", "Mintenig_2020_49", "Mintenig_2020_50")
+
+final_table <- aligned_per_polymer |>
+  select(c(Sample_ID, ends_with("summary"))) %>%
+  rename_with(
+    ~ str_replace(., "_#_m3_summary$", ""),
+    ends_with("_summary")
+  ) %>%
+ mutate(
+    across(
+      # selecteer alle kolommen behalve "Sample_ID" en "Total"
+      .cols = -c(Sample_ID, Total),
+      .fns = ~ ifelse(Sample_ID %in% special_ids, "*", .)
+    )) |> 
+  rename(`Sample ID` = Sample_ID)
+
+knitr::kable(final_table)
+#openxlsx::write.xlsx(final_table, file = paste0(output_dir, "Tables/Aligned_concentration_per_polymer.xlsx"))
+```
+
+Also save the sample IDs + river+ source + analysis method for reference
+
+```{R, warning=F, message=F}
+sample_id_ref <- polymer_shares |>
+  select(Sample_ID, River, Data_source, Analysis_method) |>
+  distinct()
+
+knitr::kable(sample_id_ref)
+#openxlsx::write.xlsx(sample_id_ref, file = paste0(output_dir, "Tables/Sample_ID_reference.xlsx"))
+```
