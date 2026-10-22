@@ -46,10 +46,9 @@ Below table illustrates an example of the dataset from Rijkswaterstaat.
 
 ```{r pyrGCMS, echo=FALSE, warning=F, message=F}
 
-pyrGCMS_data <- read_rds(paste0(project_dir, output_dir, "Data/2026-07-01-PP_SPM_Concentrations.rds"))
-# only PP concentration data (source? Ivo Freriks)
+pyrGCMS_data <- read_rds(paste0(project_dir, output_dir, "Data/2026-10-22-PP_SPM_Concentrations.rds"))
+# only PP concentration data 
 
-# flextable::set_flextable_defaults(digits = 3)
 head(pyrGCMS_data) |>
 knitr::kable()
 ```
@@ -416,7 +415,7 @@ summarise(
 
 ```{R Prepare FTIR/LDIR table, warning=F, message=F}
 
-ConcAlphaRescaledUncertain_PP_L <-readRDS(paste0(project_dir, output_dir, "Data/Rescaled_concentrations_PP_2026-04-09.Rds"))
+ConcAlphaRescaledUncertain_PP_L <-readRDS(paste0(project_dir, output_dir, "Data/Rescaled_concentrations_PP_2026-06-30.Rds"))
 
 PP_averages_table <- ConcAlphaRescaledUncertain_PP_L |>
   filter(OptionType == "concentrationOption3") |>

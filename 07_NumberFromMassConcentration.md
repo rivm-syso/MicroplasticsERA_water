@@ -1,6 +1,6 @@
 07_NumberFromMassConcentration
 ================
-2026-07-07
+2026-10-22
 
 Create figures folder if it does not yet exist
 
@@ -41,14 +41,14 @@ approach is applied.
 
 Below table illustrates an example of the dataset from Rijkswaterstaat.
 
-| lab | Inweeg (mg) | Water_type    | Analysis_method | Sampling_method | Location_name | Data_source           | Sample_no | unit | Sampling_date_from | Sampling_date_to | SPM_mg_L_avg | SPM_mg_L_median | SPM_mg_L_min | SPM_mg_L_max | SPM_n | Recovery_min | Recovery_max | Polymer | Concentration_g_kg |
-|:----|------------:|:--------------|:----------------|:----------------|:--------------|:----------------------|----------:|:-----|:-------------------|:-----------------|-------------:|----------------:|-------------:|-------------:|------:|-------------:|-------------:|:--------|-------------------:|
-| RWS |      21.000 | Surface water | TED GC-MS       | centrifuge      | Maas Eijsden  | Freriks et al. (2025) |        11 | g/kg | 2023-11-13         | 2023-11-13       |    58.000000 |            58.0 |           58 |           58 |     1 |         0.86 |          1.0 | PP      |              0.110 |
-| RWS |      18.980 | Surface water | TED GC-MS       | centrifuge      | Maas Eijsden  | Freriks et al. (2025) |        15 | g/kg | 2023-11-27         | 2023-11-27       |    38.000000 |            38.0 |           38 |           38 |     1 |         0.86 |          1.0 | PP      |              0.090 |
-| RWS |      21.050 | Surface water | TED GC-MS       | centrifuge      | Maas Eijsden  | Freriks et al. (2025) |        16 | g/kg | 2023-10-31         | 2023-10-31       |    33.500000 |            33.5 |           31 |           36 |     2 |         0.86 |          1.0 | PP      |              0.180 |
-| RWS |      19.950 | Surface water | TED GC-MS       | centrifuge      | Maas Eijsden  | Freriks et al. (2025) |        17 | g/kg | 2023-11-07         | 2023-11-07       |    37.000000 |            37.0 |           32 |           42 |     2 |         0.86 |          1.0 | PP      |              0.120 |
-| RWS |      17.485 | Surface water | TED GC-MS       | sediment kist   | Maas Eijsden  | Freriks et al. (2025) |        28 | g/kg | 2023-09-05         | 2023-10-03       |     5.976471 |             5.0 |            5 |           13 |    34 |         0.10 |          0.9 | PP      |              0.125 |
-| RWS |      20.060 | Surface water | TED GC-MS       | sediment kist   | Maas Eijsden  | Freriks et al. (2025) |        31 | g/kg | 2023-10-03         | 2023-10-31       |    10.129412 |             5.0 |            5 |           36 |    34 |         0.10 |          0.9 | PP      |              0.080 |
+| Laboratorium | Bemonsteringsdiepte (cm): | Inweeg (mg) | Water_type    | Analysis_method | Sampling_method | Location_name | Data_source           | Sample_no | unit | Sampling_date_from | Sampling_date_to | SPM_mg_L_avg | SPM_mg_L_median | SPM_mg_L_min | SPM_mg_L_max | SPM_n | Recovery_min | Recovery_max | Polymer | Concentration_g_kg |
+|:-------------|--------------------------:|------------:|:--------------|:----------------|:----------------|:--------------|:----------------------|----------:|:-----|:-------------------|:-----------------|-------------:|----------------:|-------------:|-------------:|------:|-------------:|-------------:|:--------|-------------------:|
+| RWS          |                        80 |      21.000 | Surface water | TED GC-MS       | centrifuge      | Maas Eijsden  | Freriks et al. (2025) |        11 | g/kg | 2023-11-13         | 2023-11-13       |    58.000000 |            58.0 |           58 |           58 |     1 |         0.86 |          1.0 | PP      |              0.110 |
+| RWS          |                        80 |      18.980 | Surface water | TED GC-MS       | centrifuge      | Maas Eijsden  | Freriks et al. (2025) |        15 | g/kg | 2023-11-27         | 2023-11-27       |    38.000000 |            38.0 |           38 |           38 |     1 |         0.86 |          1.0 | PP      |              0.090 |
+| RWS          |                        80 |      21.050 | Surface water | TED GC-MS       | centrifuge      | Maas Eijsden  | Freriks et al. (2025) |        16 | g/kg | 2023-10-31         | 2023-10-31       |    33.500000 |            33.5 |           31 |           36 |     2 |         0.86 |          1.0 | PP      |              0.180 |
+| RWS          |                        80 |      19.950 | Surface water | TED GC-MS       | centrifuge      | Maas Eijsden  | Freriks et al. (2025) |        17 | g/kg | 2023-11-07         | 2023-11-07       |    37.000000 |            37.0 |           32 |           42 |     2 |         0.86 |          1.0 | PP      |              0.120 |
+| RWS          |                       100 |      17.485 | Surface water | TED GC-MS       | sediment kist   | Maas Eijsden  | Freriks et al. (2025) |        28 | g/kg | 2023-09-05         | 2023-10-03       |     5.976471 |             5.0 |            5 |           13 |    34 |         0.10 |          0.9 | PP      |              0.125 |
+| RWS          |                       100 |      20.060 | Surface water | TED GC-MS       | sediment kist   | Maas Eijsden  | Freriks et al. (2025) |        31 | g/kg | 2023-10-03         | 2023-10-31       |    10.129412 |             5.0 |            5 |           36 |    34 |         0.10 |          0.9 | PP      |              0.080 |
 
 ## Polymer density
 
@@ -260,13 +260,13 @@ pyrGCMS_data |> pull(Polymer) |> unique()
 pyrGCMS_data |> pull(PolConc_ug_L) |> min()
 ```
 
-    ## [1] 0.2270576
+    ## [1] 0.3981628
 
 ``` r
 pyrGCMS_data |> pull(PolConc_ug_L) |> max()
 ```
 
-    ## [1] 121.8571
+    ## [1] 77.25816
 
 ``` r
 SPMnumber <- pyrGCMS_data |> group_by(Location_name,Sample_no,Sampling_date_from,Sampling_date_to,Sampling_method) |> 
@@ -439,7 +439,7 @@ summarise(
 ```
 
 ``` r
-ConcAlphaRescaledUncertain_PP_L <-readRDS(paste0(project_dir, output_dir, "Data/Rescaled_concentrations_PP_2026-04-09.Rds"))
+ConcAlphaRescaledUncertain_PP_L <-readRDS(paste0(project_dir, output_dir, "Data/Rescaled_concentrations_PP_2026-06-30.Rds"))
 
 PP_averages_table <- ConcAlphaRescaledUncertain_PP_L |>
   filter(OptionType == "concentrationOption3") |>
@@ -509,14 +509,14 @@ SampleNumber = 7 # change this to see how this is for different samples (see fig
     ## 
     ## Csiszar f-divergence indices with TV 
     ##      original
-    ## X1 0.04715257
-    ## X2 0.04997534
-    ## X3 0.03705562
-    ## X4 0.05204220
-    ## X5 0.06152164
-    ## X6 0.07978510
-    ## X7 0.07190987
-    ## X8 0.83226398
+    ## X1 0.05090330
+    ## X2 0.05565432
+    ## X3 0.04677197
+    ## X4 0.05073797
+    ## X5 0.05460519
+    ## X6 0.07983564
+    ## X7 0.07757698
+    ## X8 0.82329898
 
 ``` r
       #prepare output for ggplot
