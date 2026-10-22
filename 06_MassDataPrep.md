@@ -9,13 +9,19 @@ letter report 2026-0069.
 
 The mass based data measured using TED-GC-MS are provided by
 Rijkswaterstaat (RWS) for surface waters in the Netherlands. The data is
-partly described in (Freriks, Oversteeg van, and Zemmelink 2023) and
-contains the concentrations of microplastics in SPM as sampled using a
-sediment box or centrifuge at Eijsden and Lobith.
+partly described in (Freriks et al. 2023) and contains the
+concentrations of microplastics in SPM as sampled using a sediment box
+or centrifuge at Eijsden and Lobith.
+
+Update release 2026.9.1: The raw data file read in in the chunk below
+was updated after the publication of RIVM letter report 2026-0069,
+because of a revision of the detection limits. This leads to the
+exclusion of 7 points of measurements that were present in the report,
+as these points now fall below the detection limit.
 
 ``` r
 # Read in raw RWS data
-RWS_raw <- read_excel(path = file.path(Input_dir, "RWS_2025/20250520 TED GC-MS data voor RIVM.xlsx"),
+RWS_raw <- read_excel(path = file.path(Input_dir, "RWS_2025/20250520 TED GC-MS data.xlsx"),
   skip = 12,
   col_names = TRUE) 
 ```
@@ -125,7 +131,7 @@ matched_suspended_matter_concentrations <-
   mutate(
     Polymer_sum_calculated = rowSums(across(all_of(c("NR", "PA6/66", "PE", "PET", "PMMA", "PP", "PS", "SBR"))), na.rm = TRUE)
   ) |> 
-  select(-c("Bemonsterd", "van:", "tot:", "Locatie:","Omschrijving",
+  select(-c("Bemonsterd", "Startdatum bemonstering", "Einddatum bemonstering", "Locatie:","Omschrijving",
              "paroms", "ehdcod", "cpmoms", "Location_name.y")) |> 
   rename(Location_name = Location_name.x)
 ```
@@ -181,21 +187,19 @@ write_rds(PP_SPM_Concentrations,
 
 <div id="ref-freriks2023" class="csl-entry">
 
-Freriks, I, C Oversteeg van, and H Zemmelink. 2023. “Op Weg Naar
+Freriks, I, C Oversteeg van, and H Zemmelink. 2023. *Op Weg Naar
 Microplastics Monitoring in Rivieren - Deel 2: Analyse van
-Microplastics.”
+Microplastics*.
 <https://open.rijkswaterstaat.nl/open-overheid/@259816/weg-microplastics-monitoring-rivieren/>.
 
 </div>
 
 <div id="ref-harhash2023" class="csl-entry">
 
-Harhash, Mohamed, Henning Schroeder, Alexander Zavarsky, Jan Kamp,
-Annika Linkhorst, Tim Lauschke, Georg Dierkes, Thomas A. Ternes, and
-Lars Duester. 2023. “Efficiency of Five Samplers to Trap Suspended
-Particulate Matter and Microplastic Particles of Different Sizes.”
-*Chemosphere* 338 (October): 139479.
-<https://doi.org/10.1016/j.chemosphere.2023.139479>.
+Harhash, Mohamed, Henning Schroeder, Alexander Zavarsky, et al. 2023.
+“Efficiency of Five Samplers to Trap Suspended Particulate Matter and
+Microplastic Particles of Different Sizes.” *Chemosphere* 338 (October):
+139479. <https://doi.org/10.1016/j.chemosphere.2023.139479>.
 
 </div>
 
